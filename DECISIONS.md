@@ -2,6 +2,10 @@
 
 Notable architectural choices, one line of rationale each. Newest at top.
 
+## 2026-08-03 (verification)
+- **No browser on the build host** (managed Chromium sandbox won't launch; no user Chrome). Verification stack instead: (1) `node --check` on JS extracted from index.html, (2) **jsdom** full-page load — runs the whole inline script, asserts key elements exist + zero runtime errors on init, (3) real Postgres (Docker) for schema + consensus logic, (4) curl against live Pages. Real render + iPhone feel still need Cyrus.
+- **jsdom load check passed clean**: all screens/buttons/video/PWA links present, no runtime errors during boot with Phase 1 + Phase 2 changes.
+
 ## 2026-08-03 (Phase 2 start)
 - **Backend before Vite refactor.** The high-value + verifiable work (making the crowd real) goes first; the risky visual refactor waits. Backend logic is testable via Node/API without a browser (the sandboxed browser won't launch here).
 - **Supabase** for backend (Postgres + anon Auth + Realtime). Free tier, no server to run.
