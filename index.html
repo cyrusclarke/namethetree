@@ -942,9 +942,26 @@ function addMarker(tree) {
 }
 function refreshMarker(tree) { if (markers[tree.id]) { map.removeLayer(markers[tree.id]); addMarker(tree); } }
 
+// Core outdoors rule: you must be physically near a tree to name it.
+const PROXIMITY_M = 30;
+function inRange(tree) {
+  // no GPS fix yet → allow (don't punish players before a fix lands); real gate applies once we know where they are
+  if (!myPos) return true;
+  if (PROXIMITY_OFF) return true;
+  return distanceM(myPos, tree) <= PROXIMITY_M;
+}
+// desktop/dev bypass: ?nogps disables the proximity gate so the loop is testable without a real location
+const PROXIMITY_OFF = new URLSearchParams(location.search).has('nogps');
+
 function onTreeTap(tree) {
   sfx.tap();
   if (tree.mine) { toast('YOUR TREE — CURRENTLY KNOWN AS "' + consensus(tree).display.toUpperCase() + '"'); return; }
+  if (!inRange(tree)) {
+    const d = distanceM(myPos, tree);
+    toast('TOO FAR — WALK CLOSER (' + d + 'm, NEED \u2264' + PROXIMITY_M + 'm)');
+    sfx.wrong();
+    return;
+  }
   if (tree.done) {
     // you can always weigh in again — that's how a wrong crowd gets corrected
     toast(isResolved(tree)
@@ -1373,17 +1390,45 @@ document.getElementById('btn-start').addEventListener('click', () => {
   // start with last seeded location (or fallback) immediately, refine when GPS lands
   const start = state.seededAt || fallback;
   begin(start.lat, start.lng);
-  navigator.geolocation.getCurrentPosition(
-    p => {
-      myPos = { lat: p.coords.latitude, lng: p.coords.longitude };
-      if (!state.seededAt) { seedTrees(myPos.lat, myPos.lng); state.trees.forEach(addMarker); }
-      meMarker.setLatLng([myPos.lat, myPos.lng]);
-      map.setView([myPos.lat, myPos.lng], 15);
-    },
-    () => toast('NO GPS — PLAYING IN HYDE PARK MODE'),
-    { enableHighAccuracy: true, timeout: 10000 }
-  );
+  startWatchingPosition();
 });
+
+/* ---------------- continuous GPS: watchPosition + "you are here" ---------------- */
+let geoWatchId = null;
+function startWatchingPosition() {
+  if (!navigator.geolocation || geoWatchId !== null) return;
+  let firstFix = true;
+  geoWatchId = navigator.geolocation.watchPosition(
+    p => {
+      myPos = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy };
+      if (firstFix) {
+        firstFix = false;
+        if (!state.seededAt) { seedTrees(myPos.lat, myPos.lng); state.trees.forEach(addMarker); }
+        if (map) map.setView([myPos.lat, myPos.lng], 16);
+      }
+      if (meMarker) meMarker.setLatLng([myPos.lat, myPos.lng]);
+      updateNearestHint();
+    },
+    err => { if (err.code === err.PERMISSION_DENIED) toast('NO GPS — PLAYING IN HYDE PARK MODE'); },
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+  );
+}
+// live banner: how far to the closest un-named tree, so players know which way to walk
+function updateNearestHint() {
+  if (!myPos || !state.trees.length) return;
+  const banner = document.getElementById('map-banner');
+  if (!banner) return;
+  let nearest = null, nd = Infinity;
+  for (const t of state.trees) {
+    if (t.mine || t.done) continue;
+    const d = distanceM(myPos, t);
+    if (d < nd) { nd = d; nearest = t; }
+  }
+  if (!nearest) return;
+  if (nd <= PROXIMITY_M) banner.textContent = '\uD83C\uDF33 A TREE IS IN RANGE — TAP IT!';
+  else banner.textContent = '\uD83D\uDEB6 NEAREST TREE ' + nd + 'm AWAY';
+  banner.style.display = 'block';
+}
 
 bootTitleTrees();
 renderSpeciesGrid();
