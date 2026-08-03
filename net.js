@@ -78,6 +78,18 @@
     return data || [];
   };
 
+  // upload a dataURL snap to the tree-photos bucket, return its public URL
+  net.uploadPhoto = async function (dataUrl) {
+    if (!dataUrl || !net._userId) return null;
+    const blob = await (await fetch(dataUrl)).blob();
+    const path = net._userId + '/' + Date.now() + '.jpg';
+    const { error } = await net._sb.storage.from('tree-photos')
+      .upload(path, blob, { contentType: 'image/jpeg', upsert: false });
+    if (error) throw error;
+    const { data } = net._sb.storage.from('tree-photos').getPublicUrl(path);
+    return data.publicUrl;
+  };
+
   net.plantTree = async function ({ lat, lng, photoUrl }) {
     const { data, error } = await net._sb.from('trees')
       .insert({ lat, lng, photo_url: photoUrl || null, created_by: net._userId })

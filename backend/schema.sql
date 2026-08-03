@@ -138,3 +138,26 @@ create policy votes_read on votes for select using (true);
 -- Enable realtime on trees + votes so the map updates live across devices.
 alter publication supabase_realtime add table trees;
 alter publication supabase_realtime add table votes;
+
+-- ---------- storage: tree photos ----------
+-- Public bucket for player snaps. Anyone can view; authenticated players upload
+-- only into their own <user_id>/ prefix. (Skips cleanly on non-Supabase Postgres.)
+do $$
+begin
+  if exists (select 1 from information_schema.tables where table_schema='storage' and table_name='buckets') then
+    insert into storage.buckets (id, name, public)
+    values ('tree-photos', 'tree-photos', true)
+    on conflict (id) do nothing;
+
+    -- public read
+    if not exists (select 1 from pg_policies where schemaname='storage' and policyname='tree_photos_read') then
+      create policy tree_photos_read on storage.objects for select
+        using (bucket_id = 'tree-photos');
+    end if;
+    -- authenticated upload into own folder: path is '<uid>/<file>'
+    if not exists (select 1 from pg_policies where schemaname='storage' and policyname='tree_photos_write') then
+      create policy tree_photos_write on storage.objects for insert
+        with check (bucket_id = 'tree-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+    end if;
+  end if;
+end $$;

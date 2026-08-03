@@ -1292,8 +1292,10 @@ document.getElementById('btn-cap-plant').addEventListener('click', () => {
   toast('TREE PLANTED AS "' + capName.toUpperCase() + '"! +20 — NOW THE CROWD DECIDES');
   // in backend mode, persist the tree + founding vote so other players see it
   if (BACKEND.on) {
-    const nm = capName;
-    NTT_NET.plantTree({ lat: pos.lat, lng: pos.lng, photoUrl: null })
+    const nm = capName, snap = capPhoto;
+    // upload the snap first so other players see the real photo, then plant + vote
+    NTT_NET.uploadPhoto(snap).catch(() => null)
+      .then(url => NTT_NET.plantTree({ lat: pos.lat, lng: pos.lng, photoUrl: url }))
       .then(id => {
         // swap local temp id for the server id so realtime updates line up
         const old = tree.id; tree.id = id;
