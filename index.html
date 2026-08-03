@@ -16,6 +16,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="net.js"></script>
 <style>
   :root {
     --bg: #1a1c2c;
@@ -1076,6 +1077,10 @@ function answer(text) {
 
   // your vote carries YOUR trust weight — a TREE ELDER moves consensus 5× harder than a SPROUT
   const myKey = text ? castVote(tree, text, myWeight()) : null;
+  // in backend mode, also persist the vote server-side (weight recomputed from rep there)
+  if (BACKEND.on && text && myKey) {
+    NTT_NET.castVote(tree.id, text).catch(e => { console.warn('vote sync failed:', e); toast('VOTE SAVED LOCALLY — SYNC FAILED'); });
+  }
   guess.myKey = myKey;
   tree.done = true;
   if (myKey) handleRename(tree, beforeKey);
@@ -1285,6 +1290,18 @@ document.getElementById('btn-cap-plant').addEventListener('click', () => {
   addMarker(tree);
   sfx.plant();
   toast('TREE PLANTED AS "' + capName.toUpperCase() + '"! +20 — NOW THE CROWD DECIDES');
+  // in backend mode, persist the tree + founding vote so other players see it
+  if (BACKEND.on) {
+    const nm = capName;
+    NTT_NET.plantTree({ lat: pos.lat, lng: pos.lng, photoUrl: null })
+      .then(id => {
+        // swap local temp id for the server id so realtime updates line up
+        const old = tree.id; tree.id = id;
+        if (markers[old]) { markers[id] = markers[old]; delete markers[old]; }
+        return NTT_NET.castVote(id, nm);
+      })
+      .catch(e => { console.warn('plant sync failed:', e); toast('TREE SAVED LOCALLY — SYNC FAILED'); });
+  }
   // reset capture UI
   stopCamera();
   capPhoto = null; capName = null; capCoords = null;
@@ -1492,8 +1509,56 @@ function updateNearestHint() {
 bootTitleTrees();
 renderSpeciesGrid();
 updateHud();
-// the "other players": every 12s some of them vote on unresolved trees
-setInterval(simulateCrowd, 12000);
+// the "other players": every 12s some of them vote on unresolved trees.
+// disabled once a real backend is live (BACKEND.on) — the crowd becomes real.
+const BACKEND = { on: false, unsub: null };
+setInterval(() => { if (!BACKEND.on) simulateCrowd(); }, 12000);
+
+/* ---------------- Phase 2: optional Supabase backend (opt-in) ----------------
+   With no window.NTT_CONFIG this is a no-op and the game stays in local mode.
+   When configured, real shared trees/votes replace the simulated crowd. */
+async function bootBackend() {
+  if (!window.NTT_NET) return;
+  let me;
+  try { me = await NTT_NET.init(); } catch (e) { console.warn('backend init failed, staying local:', e); return; }
+  if (!me || !NTT_NET.enabled) return; // local mode
+  BACKEND.on = true;
+  // adopt server reputation as source of truth
+  if (typeof me.rep === 'number') { state.rep = me.rep; saveState(); updateHud(); }
+  try {
+    await syncFromBackend();
+    // live updates across devices
+    BACKEND.unsub = NTT_NET.onChange(() => { syncFromBackend().catch(()=>{}); });
+    toast('\uD83C\uDF10 CONNECTED \u2014 THE CROWD IS REAL');
+  } catch (e) { console.warn('backend sync failed, staying local:', e); BACKEND.on = false; }
+}
+// pull shared trees + votes and fold them into the local tree shape the UI already renders
+async function syncFromBackend() {
+  const [trees, votesAll] = await Promise.all([NTT_NET.fetchTrees(), NTT_NET.fetchVotes()]);
+  const byTree = {};
+  votesAll.forEach(v => { (byTree[v.tree_id] = byTree[v.tree_id] || []).push(v); });
+  // rebuild state.trees from the server (server is source of truth in backend mode)
+  const rebuilt = trees.map(t => {
+    const tr = {
+      id: t.id, lat: t.lat, lng: t.lng, labels: {},
+      truth: null, renamedFrom: null, photo: t.photo_url || null,
+      seed: parseInt(String(t.id).replace(/\D/g,'').slice(0,5) || '1', 10) || 1,
+      mine: t.created_by === NTT_NET._userId, done: false,
+    };
+    (byTree[t.id] || []).forEach(v => castVote(tr, v.label, Number(v.weight) || 1));
+    return tr;
+  });
+  state.trees = rebuilt;
+  state.seededAt = state.seededAt || (myPos ? { lat: myPos.lat, lng: myPos.lng } : null);
+  // redraw markers
+  if (map) {
+    Object.values(markers).forEach(m => { try { map.removeLayer(m); } catch(e){} });
+    for (const k in markers) delete markers[k];
+    state.trees.forEach(addMarker);
+  }
+  saveState();
+}
+bootBackend();
 
 /* ---------------- PWA: register service worker ---------------- */
 if ('serviceWorker' in navigator) {
