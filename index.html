@@ -1390,6 +1390,13 @@ renderSpeciesGrid();
 updateHud();
 // the "other players": every 12s some of them vote on unresolved trees
 setInterval(simulateCrowd, 12000);
+
+/* ---------------- PWA: register service worker ---------------- */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW registration failed:', err));
+  });
+}
 </script>
 </body>
 </html>
