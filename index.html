@@ -39,7 +39,15 @@
     line-height: 1.6;
     user-select: none;
     -webkit-user-select: none;
+    /* no iOS rubber-band / overscroll bounce */
+    overscroll-behavior: none;
+    -webkit-overflow-scrolling: auto;
+    touch-action: manipulation;
   }
+  /* safe-area insets for notch / home indicator (PWA standalone) */
+  #hud { padding-top: calc(10px + env(safe-area-inset-top)); }
+  #nav { padding-bottom: calc(env(safe-area-inset-bottom)); }
+  #screen-capture, #screen-dex, #screen-help { padding-top: calc(16px + env(safe-area-inset-top)); }
   /* CRT scanlines over everything */
   body::after {
     content: '';
@@ -659,13 +667,15 @@ function beep(freq, dur=0.09, when=0, type='square', vol=0.12) {
     o.start(a.currentTime + when); o.stop(a.currentTime + when + dur + 0.02);
   } catch (e) {}
 }
+// light haptic feedback where the device supports it (mobile). No-op on desktop/iOS-non-supporting.
+function haptic(pattern) { try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) {} }
 const sfx = {
-  start:   () => [262, 330, 392, 523].forEach((f, i) => beep(f, 0.1, i * 0.09)),
+  start:   () => { [262, 330, 392, 523].forEach((f, i) => beep(f, 0.1, i * 0.09)); haptic(30); },
   tap:     () => beep(880, 0.05),
-  correct: () => [523, 659, 784, 1047].forEach((f, i) => beep(f, 0.12, i * 0.08)),
-  wrong:   () => [330, 262, 196].forEach((f, i) => beep(f, 0.16, i * 0.12, 'sawtooth')),
+  correct: () => { [523, 659, 784, 1047].forEach((f, i) => beep(f, 0.12, i * 0.08)); haptic([20, 40, 20]); },
+  wrong:   () => { [330, 262, 196].forEach((f, i) => beep(f, 0.16, i * 0.12, 'sawtooth')); haptic(80); },
   tick:    () => beep(1200, 0.03, 0, 'square', 0.06),
-  plant:   () => [392, 494, 587, 784].forEach((f, i) => beep(f, 0.09, i * 0.07, 'triangle')),
+  plant:   () => { [392, 494, 587, 784].forEach((f, i) => beep(f, 0.09, i * 0.07, 'triangle')); haptic(40); },
   boot:    () => beep(660, 0.04, 0, 'square', 0.05),
 };
 
