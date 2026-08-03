@@ -265,6 +265,7 @@
     display: flex; align-items: center; justify-content: center; overflow: hidden;
   }
   #cap-preview { width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; }
+  #cap-video { width: 100%; height: 100%; object-fit: cover; }
   #cap-placeholder { font-size: 30px; }
   #cap-geo { font-size: 8px; color: var(--blue); text-align: center; }
   .species-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; align-content: start; }
@@ -423,11 +424,16 @@
   <div id="cap-stage">
     <div id="cap-preview-wrap">
       <span id="cap-placeholder">&#127795;</span>
+      <video id="cap-video" playsinline muted style="display:none"></video>
       <img id="cap-preview" style="display:none">
     </div>
     <div id="cap-geo">&#128205; waiting for photo...</div>
     <input type="file" id="cap-input" accept="image/*" capture="environment" style="display:none">
-    <button class="btn blue" id="btn-cap-photo">TAKE PHOTO</button>
+    <div id="cap-photo-btns" style="display:flex; gap:8px; width:100%;">
+      <button class="btn blue" id="btn-cap-camera" style="flex:1;">&#128247; CAMERA</button>
+      <button class="btn" id="btn-cap-photo" style="flex:1;">&#128193; UPLOAD</button>
+    </div>
+    <button class="btn primary" id="btn-cap-shoot" style="display:none; width:100%;">&#128248; SNAP!</button>
     <div id="cap-name-step" style="display:none; width:100%; text-align:center;">
       <div style="font-size:9px; color:var(--yellow); margin-bottom:10px;">WHAT DO *YOU* SAY IT IS?<br><span style="font-size:7px; color:#9bb0d0;">type anything — your vote starts the consensus</span></div>
       <div id="cap-custom"><input id="cap-custom-input" type="text" placeholder="TYPE A NAME..." maxlength="24" autocomplete="off"></div>
@@ -886,6 +892,8 @@ function handleRename(tree, beforeKey) {
 
 /* ---------------- screens / nav ---------------- */
 function show(id) {
+  // leaving the capture screen releases the camera (battery + privacy)
+  if (id !== 'capture' && typeof camStream !== 'undefined' && camStream) stopCamera();
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById('screen-' + id).classList.add('active');
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.nav === id));
@@ -1149,32 +1157,72 @@ document.getElementById('cap-custom-input').addEventListener('input', e => {
   if (capName) document.querySelectorAll('#species-grid .sp').forEach(el => el.classList.remove('sel'));
 });
 
+// shared: crunch any source (uploaded file or camera frame) to a chunky-retro 160px square,
+// stash it as capPhoto, reveal the naming step, and grab GPS at capture time.
+function processCaptureSource(source, sw, sh) {
+  const side = Math.min(sw, sh);
+  const small = document.createElement('canvas');
+  small.width = small.height = 160;
+  const sx = small.getContext('2d');
+  sx.imageSmoothingEnabled = false;
+  sx.drawImage(source, (sw - side)/2, (sh - side)/2, side, side, 0, 0, 160, 160);
+  capPhoto = small.toDataURL('image/jpeg', 0.7);
+  const prev = document.getElementById('cap-preview');
+  prev.src = capPhoto; prev.style.display = 'block';
+  document.getElementById('cap-placeholder').style.display = 'none';
+  document.getElementById('cap-name-step').style.display = 'block';
+  document.getElementById('cap-geo').textContent = '\u{1F4CD} locating...';
+  if (navigator.geolocation) navigator.geolocation.getCurrentPosition(
+    p => { capCoords = { lat: p.coords.latitude, lng: p.coords.longitude }; document.getElementById('cap-geo').textContent = '\u{1F4CD} ' + capCoords.lat.toFixed(4) + ', ' + capCoords.lng.toFixed(4); },
+    () => { capCoords = null; document.getElementById('cap-geo').textContent = '\u{1F4CD} no GPS \u2014 will plant near map centre'; },
+    { enableHighAccuracy: true, timeout: 8000 }
+  );
+}
+
+/* ---- live camera viewfinder (getUserMedia) with file-input fallback ---- */
+let camStream = null;
+function stopCamera() {
+  if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
+  const v = document.getElementById('cap-video');
+  v.style.display = 'none'; v.srcObject = null;
+  document.getElementById('btn-cap-shoot').style.display = 'none';
+  document.getElementById('cap-photo-btns').style.display = 'flex';
+}
+async function startCamera() {
+  const v = document.getElementById('cap-video');
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 1280 } },
+      audio: false,
+    });
+    v.srcObject = camStream;
+    await v.play();
+    document.getElementById('cap-placeholder').style.display = 'none';
+    document.getElementById('cap-preview').style.display = 'none';
+    v.style.display = 'block';
+    document.getElementById('cap-photo-btns').style.display = 'none';
+    document.getElementById('btn-cap-shoot').style.display = 'block';
+  } catch (err) {
+    // no camera / denied / not HTTPS \u2014 fall back to the file picker
+    toast('CAMERA UNAVAILABLE \u2014 USING UPLOAD');
+    document.getElementById('cap-input').click();
+  }
+}
+document.getElementById('btn-cap-camera').addEventListener('click', () => { sfx.tap(); startCamera(); });
+document.getElementById('btn-cap-shoot').addEventListener('click', () => {
+  sfx.plant();
+  const v = document.getElementById('cap-video');
+  const sw = v.videoWidth || 1280, sh = v.videoHeight || 1280;
+  processCaptureSource(v, sw, sh);
+  stopCamera();
+});
+
 document.getElementById('btn-cap-photo').addEventListener('click', () => { sfx.tap(); document.getElementById('cap-input').click(); });
 document.getElementById('cap-input').addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
   const img = new Image();
-  img.onload = () => {
-    // crop square + downscale: 160px keeps the species identifiable but still chunky-retro
-    const side = Math.min(img.width, img.height);
-    const small = document.createElement('canvas');
-    small.width = small.height = 160;
-    const sx = small.getContext('2d');
-    sx.drawImage(img, (img.width - side)/2, (img.height - side)/2, side, side, 0, 0, 160, 160);
-    capPhoto = small.toDataURL('image/jpeg', 0.7);
-    const prev = document.getElementById('cap-preview');
-    prev.src = capPhoto; prev.style.display = 'block';
-    document.getElementById('cap-placeholder').style.display = 'none';
-    document.getElementById('cap-name-step').style.display = 'block';
-    URL.revokeObjectURL(img.src);
-    // grab location at capture time
-    document.getElementById('cap-geo').textContent = '\u{1F4CD} locating...';
-    navigator.geolocation.getCurrentPosition(
-      p => { capCoords = { lat: p.coords.latitude, lng: p.coords.longitude }; document.getElementById('cap-geo').textContent = '\u{1F4CD} ' + capCoords.lat.toFixed(4) + ', ' + capCoords.lng.toFixed(4); },
-      () => { capCoords = null; document.getElementById('cap-geo').textContent = '\u{1F4CD} no GPS — will plant near map centre'; },
-      { enableHighAccuracy: true, timeout: 8000 }
-    );
-  };
+  img.onload = () => { processCaptureSource(img, img.width, img.height); URL.revokeObjectURL(img.src); };
   img.src = URL.createObjectURL(f);
   e.target.value = '';
 });
@@ -1228,6 +1276,7 @@ document.getElementById('btn-cap-plant').addEventListener('click', () => {
   sfx.plant();
   toast('TREE PLANTED AS "' + capName.toUpperCase() + '"! +20 — NOW THE CROWD DECIDES');
   // reset capture UI
+  stopCamera();
   capPhoto = null; capName = null; capCoords = null;
   document.getElementById('cap-preview').style.display = 'none';
   document.getElementById('cap-placeholder').style.display = 'block';
