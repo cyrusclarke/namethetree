@@ -1,0 +1,1389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>NAME THAT TREE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --bg: #1a1c2c;
+    --bg2: #29366f;
+    --panel: #333c57;
+    --ink: #f4f4f4;
+    --green: #38b764;
+    --green2: #a7f070;
+    --red: #b13e53;
+    --yellow: #ffcd75;
+    --blue: #41a6f6;
+    --brown: #94493a;
+    --shadow: #0f0f1b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overflow: hidden; background: var(--bg); }
+  body {
+    font-family: 'Press Start 2P', monospace;
+    color: var(--ink);
+    font-size: 10px;
+    line-height: 1.6;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  /* CRT scanlines over everything */
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 1px, transparent 1px, transparent 3px);
+    pointer-events: none;
+    z-index: 9999;
+  }
+  .screen {
+    position: fixed; inset: 0;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .screen.active { display: flex; }
+
+  /* ---------- shared UI ---------- */
+  .btn {
+    font-family: inherit;
+    font-size: 11px;
+    color: var(--ink);
+    background: var(--panel);
+    border: 0;
+    padding: 14px 16px;
+    cursor: pointer;
+    box-shadow: 0 4px 0 var(--shadow);
+    text-transform: uppercase;
+    image-rendering: pixelated;
+  }
+  .btn:active { transform: translateY(4px); box-shadow: 0 0 0 var(--shadow); }
+  .btn.primary { background: var(--green); }
+  .btn.danger { background: var(--red); }
+  .btn.blue { background: var(--blue); }
+  .panel {
+    background: var(--panel);
+    border: 4px solid var(--ink);
+    box-shadow: 0 0 0 4px var(--shadow);
+    padding: 14px;
+  }
+  .blink { animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .px { image-rendering: pixelated; }
+
+  /* ---------- title screen: the TREEDEX device ---------- */
+  #screen-title {
+    background: var(--bg);
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 14px;
+  }
+  #dex-shell {
+    width: min(94vw, 390px);
+    background: #c22f45;
+    border: 4px solid #7d1f30;
+    box-shadow: 0 0 0 4px var(--shadow), inset 0 4px 0 #e05a6d;
+    padding: 14px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  #dex-topbar { display: flex; align-items: center; gap: 10px; }
+  #dex-lens {
+    width: 46px; height: 46px; border-radius: 50%;
+    background: radial-gradient(circle at 32% 30%, #bfe8ff 0 18%, #41a6f6 40%, #1d5fae 75%, #123c73 100%);
+    border: 4px solid #f4f4f4; box-shadow: 0 0 0 3px var(--shadow);
+  }
+  .dex-led { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--shadow); }
+  .dex-led.red { background: #ff5c73; }
+  .dex-led.yellow { background: var(--yellow); }
+  .dex-led.green { background: var(--green2); }
+  #dex-model { margin-left: auto; font-size: 8px; color: #ffd9de; }
+  #dex-screen {
+    background: #0f380f;
+    border: 6px solid #e8ecf1;
+    box-shadow: 0 0 0 3px var(--shadow), inset 0 0 0 3px #071c07;
+    min-height: 330px;
+    padding: 16px 12px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+    color: #8bd450;
+  }
+  #boot-hint { font-size: 9px; color: #8bd450; }
+  #boot-text { display: none; font-size: 7px; line-height: 2.2; color: #8bd450; text-align: left; align-self: flex-start; }
+  #title-main { display: none; flex-direction: column; align-items: center; gap: 12px; }
+  #title-logo { font-size: 20px; line-height: 1.5; color: #b8f078; text-shadow: 3px 3px 0 #071c07; }
+  #title-logo .alt { color: var(--yellow); }
+  #title-tag {
+    font-size: 8px; color: var(--ink); background: var(--red);
+    padding: 7px 9px; box-shadow: 3px 3px 0 #071c07;
+    transform: rotate(-2deg);
+  }
+  #title-trees { display: flex; gap: 8px; }
+  #title-trees img { width: 52px; height: 52px; }
+  #dex-controls { display: flex; align-items: center; justify-content: space-between; padding: 0 6px; }
+  #dex-dpad { position: relative; width: 54px; height: 54px; }
+  #dex-dpad::before, #dex-dpad::after {
+    content: ''; position: absolute; background: #2b2b3a; box-shadow: 0 0 0 3px var(--shadow);
+  }
+  #dex-dpad::before { left: 18px; top: 0; width: 18px; height: 54px; }
+  #dex-dpad::after { left: 0; top: 18px; width: 54px; height: 18px; }
+  #btn-start { font-size: 10px; padding: 12px 14px; }
+  .dex-ab { display: flex; gap: 8px; }
+  .dex-ab span {
+    width: 30px; height: 30px; border-radius: 50%; background: #7d1f30;
+    border: 3px solid var(--shadow); color: #ffd9de; font-size: 9px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #title-credit { position: absolute; bottom: 12px; font-size: 7px; color: #6a7b9b; }
+
+  /* ---------- HUD ---------- */
+  #hud {
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--shadow);
+    padding: 10px 12px;
+    border-bottom: 4px solid var(--panel);
+    z-index: 1000;
+    gap: 8px;
+  }
+  #hud .stat { font-size: 9px; white-space: nowrap; }
+  #hud .stat b { color: var(--yellow); }
+  #hud #hud-rank { color: var(--green2); font-size: 8px; overflow: hidden; text-overflow: ellipsis; }
+  #sound-toggle { background: none; border: 0; color: var(--ink); font-family: inherit; font-size: 12px; cursor: pointer; }
+
+  /* ---------- map screen ---------- */
+  #map { flex: 1; background: var(--bg2); z-index: 1; }
+  .leaflet-tile-pane { filter: saturate(1.5) contrast(1.15) brightness(0.95); }
+  .leaflet-tile-pane img { image-rendering: pixelated; }
+  .leaflet-container { font-family: 'Press Start 2P', monospace; }
+  .tree-marker { background: none; border: none; }
+  .tree-marker img { width: 100%; height: 100%; image-rendering: pixelated; filter: drop-shadow(2px 2px 0 rgba(15,15,27,0.6)); }
+  .tree-marker.done img { filter: grayscale(1) opacity(0.55); }
+  .tree-marker .badge {
+    position: absolute; top: -4px; right: -4px; font-size: 10px;
+  }
+  .tree-marker .badge.q {
+    background: var(--shadow); color: var(--yellow); padding: 2px 4px;
+    font-family: 'Press Start 2P', monospace; font-size: 9px;
+  }
+  .tree-marker .mlabel {
+    position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+    background: var(--shadow); color: var(--green2); font-size: 6px;
+    font-family: 'Press Start 2P', monospace; padding: 2px 3px; white-space: nowrap;
+  }
+  .me-marker { background: none; border: none; font-size: 18px; text-align: center; }
+  #map-banner {
+    position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+    z-index: 800; background: var(--shadow); padding: 6px 10px; font-size: 8px;
+    color: var(--green2); white-space: nowrap;
+  }
+
+  /* ---------- bottom nav ---------- */
+  #nav {
+    display: flex; background: var(--shadow); border-top: 4px solid var(--panel); z-index: 1000;
+  }
+  #nav button {
+    flex: 1; font-family: inherit; font-size: 9px; color: #6a7b9b;
+    background: none; border: 0; padding: 14px 4px 16px; cursor: pointer;
+  }
+  #nav button.on { color: var(--green2); }
+  #nav button .ico { display: block; font-size: 16px; margin-bottom: 6px; }
+
+  /* ---------- guess screen ---------- */
+  #screen-guess { background: var(--bg); }
+  #guess-head { padding: 12px; display: flex; justify-content: space-between; align-items: center; }
+  #guess-timer-wrap { flex: 1; height: 18px; background: var(--shadow); border: 3px solid var(--ink); margin-left: 12px; }
+  #guess-timer-bar { height: 100%; width: 100%; background: var(--green); }
+  #guess-timer-bar.hurry { background: var(--red); }
+  #guess-photo-wrap {
+    margin: 0 16px; border: 4px solid var(--ink); box-shadow: 0 0 0 4px var(--shadow);
+    background: var(--shadow); aspect-ratio: 1; max-height: 34vh; align-self: center; width: min(86vw, 34vh);
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+    position: relative;
+  }
+  #guess-photo { width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; filter: saturate(1.25) contrast(1.1); }
+  #guess-loading {
+    position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    font-size: 9px; color: var(--green2); background: var(--shadow); text-align: center; line-height: 2;
+  }
+  #guess-dist {
+    position: absolute; bottom: 6px; right: 6px; background: var(--shadow);
+    font-size: 8px; padding: 4px 6px; color: var(--yellow); z-index: 2;
+  }
+  #guess-q { text-align: center; margin: 12px 8px 8px; font-size: 10px; color: var(--yellow); }
+  #guess-custom { display: flex; gap: 8px; margin: 0 16px 10px; }
+  #guess-custom input {
+    flex: 1; min-width: 0; font-family: inherit; font-size: 9px; color: var(--ink);
+    background: var(--shadow); border: 3px solid var(--panel); padding: 10px 8px;
+    outline: none;
+  }
+  #guess-custom input:focus { border-color: var(--yellow); }
+  #guess-custom .btn { padding: 10px 14px; font-size: 10px; }
+  #cap-custom { width: 100%; }
+  #cap-custom input {
+    width: 100%; font-family: inherit; font-size: 9px; color: var(--ink);
+    background: var(--shadow); border: 3px solid var(--panel); padding: 10px 8px; outline: none;
+  }
+  #cap-custom input:focus { border-color: var(--yellow); }
+  #guess-options { flex: 1; overflow-y: auto; margin: 0 16px 16px; }
+
+  /* ---------- result screen ---------- */
+  #screen-result { background: var(--bg); align-items: center; justify-content: center; padding: 20px; gap: 16px; }
+  #result-verdict { font-size: 20px; text-shadow: 3px 3px 0 var(--shadow); }
+  #result-verdict.good { color: var(--green2); }
+  #result-verdict.bad { color: var(--red); }
+  #result-verdict.pend { color: var(--yellow); font-size: 16px; }
+  #result-points { font-size: 14px; color: var(--yellow); }
+  #result-consensus { width: 100%; max-width: 360px; }
+  #result-consensus h3 { font-size: 9px; color: var(--blue); margin-bottom: 10px; }
+  .vote-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 8px; }
+  .vote-row .vname { width: 42%; line-height: 1.5; }
+  .vote-row .vname .you { color: var(--yellow); }
+  .vote-row .vbar-wrap { flex: 1; height: 12px; background: var(--shadow); }
+  .vote-row .vbar { height: 100%; background: var(--green); }
+  .vote-row.winner .vbar { background: var(--yellow); }
+  .vote-row .vpct { width: 36px; text-align: right; }
+  #result-fact { font-size: 8px; color: #9bb0d0; text-align: center; max-width: 340px; line-height: 1.8; }
+
+  /* ---------- capture screen ---------- */
+  #screen-capture { background: var(--bg); padding: 16px; gap: 14px; overflow-y: auto; }
+  #screen-capture h2, #screen-dex h2, #screen-help h2 { font-size: 13px; color: var(--green2); text-align: center; padding: 10px 0 0; }
+  #cap-stage { display: flex; flex-direction: column; gap: 14px; align-items: center; }
+  #cap-preview-wrap {
+    width: min(70vw, 280px); aspect-ratio: 1; border: 4px solid var(--ink);
+    box-shadow: 0 0 0 4px var(--shadow); background: var(--shadow);
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+  }
+  #cap-preview { width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; }
+  #cap-placeholder { font-size: 30px; }
+  #cap-geo { font-size: 8px; color: var(--blue); text-align: center; }
+  .species-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; align-content: start; }
+  .species-grid .sp { min-width: 0; }
+  .species-grid .sp {
+    background: var(--panel); border: 3px solid transparent; padding: 6px 2px;
+    text-align: center; cursor: pointer; font-size: 6px; color: var(--ink);
+    font-family: inherit; line-height: 1.4;
+  }
+  .species-grid .sp img { width: 40px; height: 40px; image-rendering: pixelated; }
+  .species-grid .sp.sel { border-color: var(--yellow); background: var(--bg2); }
+
+  /* ---------- dex screen ---------- */
+  #screen-dex { background: var(--bg); padding: 16px; gap: 12px; overflow-y: auto; }
+  #dex-sub { text-align: center; font-size: 8px; color: #9bb0d0; line-height: 1.9; }
+  .dex-section { font-size: 9px; color: var(--blue); margin: 6px 0 2px; }
+  .dex-grid-inner { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 6px; }
+  .dex-card.discovered { border: 2px dashed var(--yellow); }
+  .dex-card { background: var(--panel); padding: 10px 6px; text-align: center; box-shadow: 0 3px 0 var(--shadow); }
+  .dex-card img { width: 52px; height: 52px; image-rendering: pixelated; }
+  .dex-card.locked img { filter: brightness(0); }
+  .dex-card .dname { font-size: 7px; margin-top: 6px; line-height: 1.5; }
+  .dex-card .dlatin { font-size: 6px; color: var(--blue); font-style: italic; margin-top: 3px; }
+  .dex-card.locked .dname, .dex-card.locked .dlatin { color: #4a5775; }
+  .dex-card .dcount { font-size: 7px; color: var(--yellow); margin-top: 4px; }
+  .dex-card .dno { font-size: 6px; color: #6a7b9b; text-align: left; }
+
+  /* ---------- dexinfo (pokedex detail) ---------- */
+  #screen-dexinfo { background: var(--bg); }
+  #dexinfo-head {
+    display: flex; align-items: center; gap: 10px; background: var(--red);
+    padding: 10px 12px; border-bottom: 4px solid var(--shadow);
+  }
+  #dexinfo-head .btn { padding: 8px 10px; font-size: 10px; box-shadow: 0 3px 0 var(--shadow); }
+  #dexinfo-no { font-size: 10px; color: var(--yellow); }
+  #dexinfo-name { font-size: 11px; flex: 1; line-height: 1.5; }
+  #dexinfo-body { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+  #dexinfo-top { display: flex; gap: 14px; }
+  .dexinfo-frame {
+    flex: 1; aspect-ratio: 1; border: 4px solid var(--ink); box-shadow: 0 0 0 4px var(--shadow);
+    background: var(--shadow); display: flex; align-items: center; justify-content: center; overflow: hidden;
+    position: relative;
+  }
+  #dexinfo-sprite { width: 84%; height: 84%; image-rendering: pixelated; }
+  #dexinfo-photo { width: 100%; height: 100%; object-fit: cover; filter: saturate(1.25) contrast(1.1); display: none; }
+  #dexinfo-photo-q { font-size: 22px; color: #4a5775; }
+  #dexinfo-latin { text-align: center; font-size: 9px; color: var(--blue); font-style: italic; }
+  #dexinfo-body .panel { padding: 10px 12px; }
+  #dexinfo-body .panel h4 { font-size: 8px; color: var(--blue); margin-bottom: 8px; }
+  .stat-row { display: flex; justify-content: space-between; gap: 10px; font-size: 8px; margin: 7px 0; line-height: 1.6; }
+  .stat-row .k { color: #9bb0d0; white-space: nowrap; }
+  .stat-row .v { text-align: right; }
+  #dexinfo-fact { font-size: 8px; color: #9bb0d0; line-height: 1.9; text-align: center; padding-bottom: 16px; }
+
+  /* ---------- help screen ---------- */
+  #screen-help { background: var(--bg); padding: 16px; gap: 14px; overflow-y: auto; }
+  #screen-help .panel { font-size: 8px; line-height: 2; }
+  #screen-help .panel b { color: var(--yellow); }
+  #screen-help .panel .g { color: var(--green2); }
+  #screen-help .panel .r { color: #ff8896; }
+  #screen-help .panel .y { color: var(--yellow); }
+
+  .back-row { display: flex; justify-content: center; padding: 10px 0 20px; }
+  #toast {
+    position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%);
+    background: var(--shadow); color: var(--green2); padding: 10px 14px;
+    font-size: 8px; z-index: 5000; display: none; max-width: 86vw; text-align: center;
+    border: 3px solid var(--green);
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ TITLE ============ -->
+<div id="screen-title" class="screen active">
+  <div id="dex-shell">
+    <div id="dex-topbar">
+      <div id="dex-lens"></div>
+      <div class="dex-led red blink"></div>
+      <div class="dex-led yellow"></div>
+      <div class="dex-led green"></div>
+      <div id="dex-model">TREEDEX-01</div>
+    </div>
+    <div id="dex-screen">
+      <div id="boot-hint"><span class="blink">&#9658;</span> TAP SCREEN TO BOOT</div>
+      <div id="boot-text"></div>
+      <div id="title-main">
+        <div id="title-logo">NAME<br>THAT<br><span class="alt">TREE</span></div>
+        <div id="title-trees"></div>
+        <div id="title-tag">DON'T TOUCH GRASS — NAME THAT TREE!</div>
+      </div>
+    </div>
+    <div id="dex-controls">
+      <div id="dex-dpad"></div>
+      <button class="btn primary" id="btn-start"><span class="blink">&#9658;</span> START</button>
+      <div class="dex-ab"><span>A</span><span>B</span></div>
+    </div>
+  </div>
+  <div id="title-credit">v0.2 PROTOTYPE — A FOREST IS A LIBRARY YOU CAN CLIMB</div>
+</div>
+
+<!-- ============ MAP ============ -->
+<div id="screen-map" class="screen">
+  <div id="hud">
+    <div class="stat">PTS <b id="hud-score">0</b></div>
+    <div class="stat">REP <b id="hud-rep">0</b></div>
+    <div class="stat" id="hud-rank">SPROUT</div>
+    <button id="sound-toggle" title="sound">&#9836;</button>
+  </div>
+  <div style="position:relative; flex:1; display:flex;">
+    <div id="map"></div>
+    <div id="map-banner">TAP A TREE TO NAME IT</div>
+  </div>
+  <div id="nav">
+    <button data-nav="map" class="on"><span class="ico">&#127757;</span>MAP</button>
+    <button data-nav="capture"><span class="ico">&#128247;</span>SNAP</button>
+    <button data-nav="dex"><span class="ico">&#127794;</span>TREEDEX</button>
+    <button data-nav="help"><span class="ico">?</span>HELP</button>
+  </div>
+</div>
+
+<!-- ============ GUESS ============ -->
+<div id="screen-guess" class="screen">
+  <div id="guess-head">
+    <div style="font-size:9px; color:var(--yellow);">&#9200;<span id="guess-secs">30</span>s</div>
+    <div id="guess-timer-wrap"><div id="guess-timer-bar"></div></div>
+  </div>
+  <div id="guess-photo-wrap">
+    <img id="guess-photo" alt="mystery tree">
+    <div id="guess-loading">&#128247;<br>DEVELOPING<br>PHOTO<span class="blink">...</span></div>
+    <div id="guess-dist"></div>
+  </div>
+  <div id="guess-q">NAME THAT TREE!</div>
+  <div id="guess-custom">
+    <input id="guess-input" type="text" placeholder="TYPE ANY NAME... EVEN STEVE" maxlength="24" autocomplete="off">
+    <button class="btn blue" id="btn-guess-go">GO</button>
+  </div>
+  <div id="guess-options" class="species-grid"></div>
+</div>
+
+<!-- ============ RESULT ============ -->
+<div id="screen-result" class="screen">
+  <div id="result-verdict"></div>
+  <div id="result-points"></div>
+  <div id="result-consensus" class="panel">
+    <h3>&#128499; THE PEOPLE HAVE SPOKEN:</h3>
+    <div id="result-votes"></div>
+  </div>
+  <div id="result-fact"></div>
+  <button class="btn primary" id="btn-result-done">BACK TO MAP</button>
+</div>
+
+<!-- ============ CAPTURE ============ -->
+<div id="screen-capture" class="screen">
+  <h2>&#128247; SNAP A TREE</h2>
+  <div id="cap-stage">
+    <div id="cap-preview-wrap">
+      <span id="cap-placeholder">&#127795;</span>
+      <img id="cap-preview" style="display:none">
+    </div>
+    <div id="cap-geo">&#128205; waiting for photo...</div>
+    <input type="file" id="cap-input" accept="image/*" capture="environment" style="display:none">
+    <button class="btn blue" id="btn-cap-photo">TAKE PHOTO</button>
+    <div id="cap-name-step" style="display:none; width:100%; text-align:center;">
+      <div style="font-size:9px; color:var(--yellow); margin-bottom:10px;">WHAT DO *YOU* SAY IT IS?<br><span style="font-size:7px; color:#9bb0d0;">type anything — your vote starts the consensus</span></div>
+      <div id="cap-custom"><input id="cap-custom-input" type="text" placeholder="TYPE A NAME..." maxlength="24" autocomplete="off"></div>
+      <div style="font-size:7px; color:#6a7b9b; margin:10px 0 6px;">— OR PICK A COMMON ONE —</div>
+      <div id="species-grid" class="species-grid"></div>
+      <div style="margin-top:14px;"><button class="btn primary" id="btn-cap-plant" disabled>PLANT IT ON THE MAP (+20)</button></div>
+    </div>
+  </div>
+  <div class="back-row"><button class="btn" data-nav="map">&#9664; BACK</button></div>
+</div>
+
+<!-- ============ DEX ============ -->
+<div id="screen-dex" class="screen">
+  <h2>&#127794; TREEDEX</h2>
+  <div id="dex-sub"></div>
+  <div id="dex-grid"></div>
+  <div class="back-row"><button class="btn" data-nav="map">&#9664; BACK</button></div>
+</div>
+
+<!-- ============ DEXINFO ============ -->
+<div id="screen-dexinfo" class="screen">
+  <div id="dexinfo-head">
+    <button class="btn" data-nav="dex">&#9664;</button>
+    <div id="dexinfo-no">#000</div>
+    <div id="dexinfo-name">???</div>
+  </div>
+  <div id="dexinfo-body">
+    <div id="dexinfo-top">
+      <div class="dexinfo-frame"><img id="dexinfo-sprite"></div>
+      <div class="dexinfo-frame">
+        <span id="dexinfo-photo-q">?</span>
+        <img id="dexinfo-photo">
+      </div>
+    </div>
+    <div id="dexinfo-latin"></div>
+    <div class="panel"><h4>DATA</h4><div id="dexinfo-stats"></div></div>
+    <div class="panel"><h4>FIELD ID TIPS</h4><div id="dexinfo-tips"></div></div>
+    <div class="panel"><h4>YOUR RECORD</h4><div id="dexinfo-record"></div></div>
+    <div id="dexinfo-fact"></div>
+  </div>
+</div>
+
+<!-- ============ HELP ============ -->
+<div id="screen-help" class="screen">
+  <h2>? HOW TO PLAY</h2>
+  <div class="panel">
+    <b>1. EXPLORE.</b> Trees near you appear on the map. Walk to them IRL for full effect.<br><br>
+    <b>2. NAME IT.</b> Tap a tree, get <span class="r">60 SECONDS</span>, and <b>type any name you like</b> — a real species, or "Steve". Quick-pick chips are just suggestions.<br><br>
+    <b>3. THE CROWD IS THE JUDGE — LIKE WIKIPEDIA.</b> Votes are secret until you cast yours, and each vote carries the voter's <span class="g">TRUST WEIGHT</span>. A name is <span class="g">CONFIRMED</span> once it holds 60%+ of the weight. "Steve" can win early — but as trusted namers pile onto the real species, the name <span class="y">flips</span> and the tree is publicly renamed. Truth wins over time.<br><br>
+    <b>4. EARN TRUST (REP).</b> Everyone starts a <span class="g">SPROUT (×1)</span>. Call an unconfirmed tree right and the crowd later agrees → <span class="g">+8 REP</span>. Guess wrong, or plant a name that gets overturned → <span class="r">rep down</span>. Climb: SCOUT ×1.5 &rarr; RANGER ×2 &rarr; ARBORIST ×3 &rarr; <span class="g">TREE ELDER ×5</span>. Higher trust = heavier votes.<br><br>
+    <b>5. DISCOVER.</b> Science knows 60,000+ tree species — <span class="y">~9,000 still undiscovered</span>. Confirmed names that match no known species become <b>candidates</b> in your Treedex. Maybe you'll surface a real one.<br><br>
+    <span class="r">DON'T TOUCH GRASS — NAME THAT TREE!</span>
+  </div>
+  <div class="back-row"><button class="btn" data-nav="map">&#9664; BACK</button></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+/* =====================================================================
+   NAME THAT TREE — v0.1 local prototype
+   ===================================================================== */
+
+/* ---------------- species data ---------------- */
+const SPECIES = [
+  { id:'oak',      name:'English Oak',    latin:'Quercus robur',          crown:'#38b764', shape:'broad',   deco:null,
+    family:'Fagaceae', kind:'BROADLEAF', height:'20–40m', leaf:'Round-lobed, almost no stalk', bark:'Fissured grey-brown', fruit:'Acorns in little cups',
+    fact:'Oaks host more life than any other native tree — over 2,300 species depend on them.' },
+  { id:'birch',    name:'Silver Birch',   latin:'Betula pendula',         crown:'#a7f070', shape:'airy',    deco:null,
+    family:'Betulaceae', kind:'BROADLEAF', height:'15–25m', leaf:'Small triangles, toothed edges', bark:'White, papery, peeling', fruit:'Drooping catkins',
+    fact:'The papery white bark peels like paint and was once used to write on.' },
+  { id:'pine',     name:'Scots Pine',     latin:'Pinus sylvestris',       crown:'#257179', shape:'conical', deco:null,
+    family:'Pinaceae', kind:'CONIFER', height:'15–35m', leaf:'Blue-green needles in pairs', bark:'Orange-red plates up top', fruit:'Small woody cones',
+    fact:'Scotland\'s national tree. The orange upper bark glows at sunset.' },
+  { id:'willow',   name:'Weeping Willow', latin:'Salix babylonica',       crown:'#6ab84f', shape:'weeping', deco:null,
+    family:'Salicaceae', kind:'BROADLEAF', height:'10–25m', leaf:'Long + narrow on hanging shoots', bark:'Grey-brown, ridged', fruit:'Fluffy catkins',
+    fact:'Willow bark contains salicin — the original aspirin.' },
+  { id:'chestnut', name:'Horse Chestnut', latin:'Aesculus hippocastanum', crown:'#2e8b4f', shape:'dome',    deco:'#f4f4f4',
+    family:'Sapindaceae', kind:'BROADLEAF', height:'15–30m', leaf:'Hand-shaped, 5–7 leaflets', bark:'Grey-pink, scaly', fruit:'Conkers in spiky cases',
+    fact:'Its white flower spikes are called candles. Conkers are NOT edible.' },
+  { id:'plane',    name:'London Plane',   latin:'Platanus × hispanica',   crown:'#4fa05a', shape:'broad',   deco:null,
+    family:'Platanaceae', kind:'BROADLEAF', height:'20–35m', leaf:'Maple-like, leathery', bark:'Camo patches, flaking', fruit:'Spiky dangling balls',
+    fact:'Sheds pollution with its flaking camo bark — the ultimate city tree.' },
+  { id:'rowan',    name:'Rowan',          latin:'Sorbus aucuparia',       crown:'#52a05f', shape:'small',   deco:'#b13e53',
+    family:'Rosaceae', kind:'BROADLEAF', height:'8–15m', leaf:'Feather-rows of leaflets', bark:'Smooth silvery-grey', fruit:'Clusters of red berries',
+    fact:'AKA mountain ash. Folklore says rowans guard against witches.' },
+  { id:'beech',    name:'Common Beech',   latin:'Fagus sylvatica',        crown:'#3f9e54', shape:'dome',    deco:null,
+    family:'Fagaceae', kind:'BROADLEAF', height:'25–40m', leaf:'Oval, wavy edge, silky young', bark:'Smooth grey elephant skin', fruit:'Nuts in bristly husks',
+    fact:'Beech canopies are so dense almost nothing grows beneath them.' },
+  { id:'ash',      name:'Common Ash',     latin:'Fraxinus excelsior',     crown:'#5fae5a', shape:'airy',    deco:null,
+    family:'Oleaceae', kind:'BROADLEAF', height:'20–35m', leaf:'Opposite leaflets, jet-black buds', bark:'Pale grey, latticed', fruit:'Winged keys in bunches',
+    fact:'In Norse myth the world-tree Yggdrasil was an ash.' },
+  { id:'sycamore', name:'Sycamore',       latin:'Acer pseudoplatanus',    crown:'#2e8b4f', shape:'broad',   deco:null,
+    family:'Sapindaceae', kind:'BROADLEAF', height:'20–35m', leaf:'5-lobed maple leaves', bark:'Grey-pink, flaking squares', fruit:'Helicopter seed pairs',
+    fact:'Its winged seeds are nature\'s helicopters.' },
+  { id:'holly',    name:'Holly',          latin:'Ilex aquifolium',        crown:'#1e6e41', shape:'small',   deco:'#b13e53',
+    family:'Aquifoliaceae', kind:'EVERGREEN', height:'5–15m', leaf:'Glossy, dark, spiky', bark:'Smooth grey', fruit:'Red berries (females only)',
+    fact:'Only female hollies bear the red berries.' },
+  { id:'yew',      name:'Yew',            latin:'Taxus baccata',          crown:'#1a5c38', shape:'wide',    deco:'#b13e53',
+    family:'Taxaceae', kind:'CONIFER', height:'10–20m', leaf:'Flat dark needles in rows', bark:'Red-brown, flaky', fruit:'Red berry-like arils',
+    fact:'Some churchyard yews are older than the churches — 2,000+ years.' },
+  { id:'hawthorn', name:'Hawthorn',       latin:'Crataegus monogyna',     crown:'#4a9e50', shape:'small',   deco:'#f4f4f4',
+    family:'Rosaceae', kind:'BROADLEAF', height:'5–10m', leaf:'Small, deeply lobed', bark:'Knotted, fissured', fruit:'May blossom, red haws',
+    fact:'The May tree — its blossom marks the start of summer.' },
+  { id:'cherry',   name:'Wild Cherry',    latin:'Prunus avium',           crown:'#e890b0', shape:'dome',    deco:'#f4c5d4',
+    family:'Rosaceae', kind:'BROADLEAF', height:'15–25m', leaf:'Oval, toothed, red leaf-stalk glands', bark:'Shiny red-brown, banded', fruit:'White blossom, small cherries',
+    fact:'Blossoms for barely two weeks a year. Blink and you miss it.' },
+  { id:'monkey',   name:'Monkey Puzzle',  latin:'Araucaria araucana',     crown:'#1d7060', shape:'spiky',   deco:null,
+    family:'Araucariaceae', kind:'CONIFER', height:'20–40m', leaf:'Triangular armoured scales', bark:'Grey, wrinkled rings', fruit:'Huge spiky cones',
+    fact:'A living fossil from Chile — it watched dinosaurs go extinct.' },
+  { id:'apple',    name:'Crab Apple',     latin:'Malus sylvestris',       crown:'#56a84f', shape:'small',   deco:'#ffcd75',
+    family:'Rosaceae', kind:'BROADLEAF', height:'4–10m', leaf:'Oval, toothed, woolly beneath', bark:'Brown, cracked', fruit:'Small hard yellow-green apples',
+    fact:'The wild ancestor hiding in hedgerows behind every orchard apple.' },
+];
+const SP = Object.fromEntries(SPECIES.map(s => [s.id, s]));
+// generic sprite for crowd-coined labels that aren't (yet) a known species — "Steve", candidate species, etc.
+SP['__unknown__'] = { id:'__unknown__', name:'Unknown', latin:'Candidatus arboris', crown:'#6a9b5b', shape:'dome', deco:null };
+
+/* ---------------- pixel sprite renderer ---------------- */
+const spriteCache = {};
+function mulberry(seed){ return function(){ seed|=0; seed=seed+0x6D2B79F5|0; let t=Math.imul(seed^seed>>>15,1|seed); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+function treeSprite(spId, seed=1, size=64) {
+  const key = spId + ':' + seed + ':' + size;
+  if (spriteCache[key]) return spriteCache[key];
+  const sp = SP[spId];
+  const G = 32;                       // logical pixel grid
+  const c = document.createElement('canvas');
+  c.width = c.height = G;
+  const x = c.getContext('2d');
+  const rnd = mulberry(seed * 7919 + spId.length);
+  const px = (cx, cy, col) => { x.fillStyle = col; x.fillRect(Math.round(cx), Math.round(cy), 1, 1); };
+  const blob = (cx, cy, rx, ry, col, jitter=0.18) => {
+    for (let yy = -ry; yy <= ry; yy++)
+      for (let xx = -rx; xx <= rx; xx++) {
+        const d = (xx*xx)/(rx*rx) + (yy*yy)/(ry*ry);
+        if (d <= 1 + (rnd()-0.5)*jitter) px(cx+xx, cy+yy, col);
+      }
+  };
+  const dark = shade(sp.crown, -28), lite = shade(sp.crown, 30);
+  const trunk = '#94493a', trunkD = '#5e2f28';
+
+  // trunk first (shape-dependent height)
+  const groundY = 30;
+  function drawTrunk(topY, w=2) {
+    for (let yy = topY; yy <= groundY; yy++)
+      for (let xx = 0; xx < w; xx++)
+        px(15 + xx - Math.floor(w/2) + 1, yy, xx === w-1 ? trunkD : trunk);
+  }
+
+  switch (sp.shape) {
+    case 'broad':
+      drawTrunk(18, 3);
+      blob(16, 12, 11, 8, dark); blob(13, 10, 7, 5, sp.crown); blob(20, 13, 6, 4, sp.crown); blob(15, 8, 4, 3, lite);
+      break;
+    case 'dome':
+      drawTrunk(20, 3);
+      blob(16, 11, 9, 9, dark); blob(15, 10, 7, 7, sp.crown); blob(13, 7, 3, 3, lite);
+      break;
+    case 'airy':
+      drawTrunk(12, 2);
+      blob(12, 9, 5, 4, sp.crown, 0.6); blob(20, 11, 5, 4, sp.crown, 0.6); blob(16, 5, 4, 3, lite, 0.6); blob(16, 13, 4, 3, dark, 0.6);
+      if (spId === 'birch') { x.fillStyle = '#e8e8e8'; x.fillRect(15, 12, 2, 19); x.fillStyle = '#1a1c2c'; [14,18,22,26].forEach(yy => x.fillRect(15 + (yy%4===2?1:0), yy, 1, 1)); }
+      break;
+    case 'conical':
+      drawTrunk(24, 2);
+      blob(16, 23, 9, 2, dark); blob(16, 19, 7, 2, sp.crown); blob(16, 15, 6, 2, dark); blob(16, 11, 4, 2, sp.crown); blob(16, 7, 3, 2, lite); px(16, 4, lite);
+      break;
+    case 'weeping':
+      drawTrunk(14, 3);
+      blob(16, 9, 9, 5, sp.crown); blob(16, 7, 5, 3, lite);
+      for (let i = 0; i < 9; i++) { const sx = 8 + i*2; const len = 8 + Math.floor(rnd()*9); for (let yy = 0; yy < len; yy++) px(sx, 11 + yy, yy % 3 === 2 ? dark : sp.crown); }
+      break;
+    case 'small':
+      drawTrunk(22, 2);
+      blob(16, 17, 7, 6, dark); blob(15, 16, 5, 4, sp.crown); blob(14, 14, 3, 2, lite);
+      break;
+    case 'wide':
+      drawTrunk(24, 4);
+      blob(16, 18, 12, 7, dark); blob(14, 16, 8, 4, sp.crown); blob(20, 15, 4, 2, lite);
+      break;
+    case 'spiky':
+      drawTrunk(16, 2);
+      x.fillStyle = sp.crown;
+      for (let a = 0; a < 10; a++) { const ang = a/10 * Math.PI*2; for (let r = 0; r < 8; r++) px(16 + Math.cos(ang)*r*0.9, 10 + Math.sin(ang)*r*0.7, r > 5 ? dark : sp.crown); }
+      blob(16, 10, 3, 3, lite);
+      break;
+  }
+  // decorations (berries / blossom / candles)
+  if (sp.deco) for (let i = 0; i < 10; i++) px(9 + rnd()*14, 6 + rnd()*12, sp.deco);
+  // ground
+  x.fillStyle = '#2e5e3f'; x.fillRect(8, 31, 16, 1);
+
+  const out = document.createElement('canvas');
+  out.width = out.height = size;
+  const ox = out.getContext('2d');
+  ox.imageSmoothingEnabled = false;
+  ox.drawImage(c, 0, 0, size, size);
+  const url = out.toDataURL();
+  spriteCache[key] = url;
+  return url;
+}
+function shade(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.max(0, Math.min(255, (n >> 16) + amt));
+  const g = Math.max(0, Math.min(255, ((n >> 8) & 255) + amt));
+  const b = Math.max(0, Math.min(255, (n & 255) + amt));
+  return '#' + ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0');
+}
+
+/* ---------------- chip-tune audio ---------------- */
+let AC = null;
+function ac() { if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)(); return AC; }
+function beep(freq, dur=0.09, when=0, type='square', vol=0.12) {
+  if (!state.sound) return;
+  try {
+    const a = ac(), o = a.createOscillator(), g = a.createGain();
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol, a.currentTime + when);
+    g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + when + dur);
+    o.connect(g); g.connect(a.destination);
+    o.start(a.currentTime + when); o.stop(a.currentTime + when + dur + 0.02);
+  } catch (e) {}
+}
+const sfx = {
+  start:   () => [262, 330, 392, 523].forEach((f, i) => beep(f, 0.1, i * 0.09)),
+  tap:     () => beep(880, 0.05),
+  correct: () => [523, 659, 784, 1047].forEach((f, i) => beep(f, 0.12, i * 0.08)),
+  wrong:   () => [330, 262, 196].forEach((f, i) => beep(f, 0.16, i * 0.12, 'sawtooth')),
+  tick:    () => beep(1200, 0.03, 0, 'square', 0.06),
+  plant:   () => [392, 494, 587, 784].forEach((f, i) => beep(f, 0.09, i * 0.07, 'triangle')),
+  boot:    () => beep(660, 0.04, 0, 'square', 0.05),
+};
+
+/* ---------------- looping 8-bit theme: "Forest Stroll" ---------------- */
+// gentle C-major pentatonic lead over a soft two-note bass — nature-y, not annoying
+const music = (() => {
+  const C4=261.63,D4=293.66,E4=329.63,G4=392.00,A4=440.00,C5=523.25,D5=587.33,E5=659.25,G5=783.99;
+  const _=0; // rest
+  const LEAD = [E4,G4,A4,C5, D5,C5,A4,G4, E4,G4,A4,G4, E4,D4,C4,_,
+                G4,A4,C5,D5, E5,D5,C5,A4, G4,E4,G4,A4, C5,_,A4,_];
+  const BASS = [C4,_,_,_, G4,_,_,_, A4,_,_,_, E4,_,_,_,
+                C4,_,_,_, G4,_,_,_, A4,_,_,_, G4,_,_,_].map(f => f && f/2);
+  let timer = null, step = 0;
+  const STEP_MS = 200;
+  function note(freq, type, dur, vol) {
+    if (!freq) return;
+    try {
+      const a = ac(), o = a.createOscillator(), g = a.createGain();
+      o.type = type; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, a.currentTime);
+      g.gain.exponentialRampToValueAtTime(vol, a.currentTime + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + dur);
+      o.connect(g); g.connect(a.destination);
+      o.start(); o.stop(a.currentTime + dur + 0.02);
+    } catch (e) {}
+  }
+  function tick() {
+    if (!state.sound) return;
+    note(LEAD[step % LEAD.length], 'square', 0.18, 0.05);
+    note(BASS[step % BASS.length], 'triangle', 0.34, 0.06);
+    step++;
+  }
+  return {
+    on: false,
+    start() { if (this.on) return; this.on = true; step = 0; try { ac().resume(); } catch(e){} timer = setInterval(tick, STEP_MS); },
+    stop() { this.on = false; clearInterval(timer); timer = null; },
+    toggle() { this.on ? this.stop() : this.start(); },
+  };
+})();
+
+/* ---------------- state + reputation ---------------- */
+// Trust ladder. Everyone starts a SPROUT (vote weight ×1) — we don't trust new players.
+// Reputation is earned only when time proves your calls right; higher tiers cast heavier votes.
+// (A curated expert could be seeded straight into ARBORIST+ in the backed version.)
+const LEVELS = [
+  { min: 0,   name: 'SPROUT',     weight: 1   },
+  { min: 40,  name: 'SCOUT',      weight: 1.5 },
+  { min: 120, name: 'RANGER',     weight: 2   },
+  { min: 280, name: 'ARBORIST',   weight: 3   },
+  { min: 600, name: 'TREE ELDER', weight: 5   },
+];
+const DEFAULT_STATE = { score: 0, rep: 0, streak: 0, sound: true, trees: [], dex: {}, attempts: {}, pending: [], seededAt: null };
+let state = loadState();
+function loadState() {
+  try { const s = JSON.parse(localStorage.getItem('ntt-state-v3')); if (s && Array.isArray(s.trees)) return Object.assign({}, DEFAULT_STATE, s); } catch (e) {}
+  return JSON.parse(JSON.stringify(DEFAULT_STATE));
+}
+function saveState() { try { localStorage.setItem('ntt-state-v3', JSON.stringify(state)); } catch (e) { toast('STORAGE FULL — PHOTO NOT SAVED'); } }
+function myLevel() { let lv = LEVELS[0]; for (const l of LEVELS) if (state.rep >= l.min) lv = l; return lv; }
+function myWeight() { return myLevel().weight; }
+function nextLevel() { return LEVELS.find(l => l.min > state.rep) || null; }
+function addRep(n, why) {
+  state.rep = Math.max(0, state.rep + n);
+  if (why) toast((n >= 0 ? '+' : '') + n + ' REP — ' + why);
+}
+
+/* ---------------- label helpers (open, free-text naming) ---------------- */
+function labelKey(s) { return String(s || '').toLowerCase().trim().replace(/\s+/g, ' ').replace(/[^a-z0-9× ]/g, ''); }
+const LABEL_TO_SP = {};
+SPECIES.forEach(s => { LABEL_TO_SP[labelKey(s.name)] = s; LABEL_TO_SP[labelKey(s.latin)] = s; });
+function spForLabel(key) { return LABEL_TO_SP[key] || null; }
+function spriteForLabel(key, seed) { const sp = spForLabel(key); return treeSprite(sp ? sp.id : '__unknown__', seed || 1, 64); }
+function prettyLabel(key, fallback) { const sp = spForLabel(key); return sp ? sp.name : (fallback || key.replace(/\b\w/g, c => c.toUpperCase())); }
+// cast a weighted vote onto a tree; known species collapse to their canonical name
+function castVote(tree, display, weight) {
+  const key = labelKey(display);
+  if (!key) return null;
+  const l = tree.labels[key] || (tree.labels[key] = { display: prettyLabel(key, display), weight: 0, count: 0 });
+  if (spForLabel(key)) l.display = spForLabel(key).name;
+  l.weight += weight; l.count += 1;
+  return key;
+}
+
+/* ---------------- real species photos (iNaturalist, Wikipedia fallback) ---------------- */
+const photoUrlCache = {};
+async function speciesPhoto(spId) {
+  if (spId in photoUrlCache) return photoUrlCache[spId];
+  let u = null;
+  try {
+    // iNaturalist default photos are vetted shots of the actual organism — ideal for an ID game
+    const r = await fetch('https://api.inaturalist.org/v1/taxa?q=' + encodeURIComponent(SP[spId].latin) + '&per_page=1');
+    const j = await r.json();
+    const p = j.results && j.results[0] && j.results[0].default_photo;
+    u = (p && p.medium_url) || null;
+  } catch (e) {}
+  if (!u) {
+    try {
+      const title = SP[spId].latin.replace(/ /g, '_');
+      const r = await fetch('https://en.wikipedia.org/api/rest_v1/page/summary/' + encodeURIComponent(title));
+      const j = await r.json();
+      u = (j.thumbnail && j.thumbnail.source) || null;
+    } catch (e) {}
+  }
+  photoUrlCache[spId] = u;
+  return u;
+}
+
+/* ---------------- seeding demo trees ---------------- */
+const JUNK_NAMES = ['Steve', 'Big Gary', 'Treebeard', 'Mr Leafy', 'Groot', 'The Green Lad', 'Kevin'];
+function seedTrees(lat, lng) {
+  const rnd = mulberry(Math.floor(lat * 1000) + Math.floor(lng * 1000) + 99);
+  const picks = [...SPECIES].sort(() => rnd() - 0.5).slice(0, 12);
+  picks.forEach((sp, i) => {
+    const tree = {
+      id: 'demo-' + i,
+      lat: lat + (rnd() - 0.5) * 0.012,
+      lng: lng + (rnd() - 0.5) * 0.018,
+      labels: {},
+      truth: sp.name,          // what the tree ACTUALLY is — drives the simulated crowd, never shown
+      renamedFrom: null,
+      photo: null,
+      seed: Math.floor(rnd() * 99999),
+      mine: false, done: false,
+    };
+    const scenario = i < 5 ? 'confirmed' : (i < 9 ? 'contested' : 'fresh');
+    if (scenario === 'confirmed') {
+      // settled: heavy accurate weight already in
+      castVote(tree, sp.name, 6 + rnd() * 6);
+      if (rnd() < 0.5) castVote(tree, JUNK_NAMES[Math.floor(rnd() * JUNK_NAMES.length)], 1);
+    } else if (scenario === 'contested') {
+      // the "STEVE" case: a silly name currently LEADS on low-weight crowd votes,
+      // with the real species trailing — high-rep accurate votes will overturn it over time
+      const junk = JUNK_NAMES[Math.floor(rnd() * JUNK_NAMES.length)];
+      castVote(tree, junk, 2 + rnd() * 2);
+      castVote(tree, sp.name, 1);
+    } else {
+      // barely touched
+      castVote(tree, sp.name, 1);
+    }
+    state.trees.push(tree);
+  });
+  state.seededAt = { lat, lng };
+  saveState();
+}
+
+/* ---------------- consensus + resolution (weighted) ---------------- */
+const RESOLVE_MIN_WEIGHT = 6, RESOLVE_SHARE = 0.6;
+function consensus(tree) {
+  let bestKey = null, best = -1, total = 0;
+  for (const [key, l] of Object.entries(tree.labels)) {
+    total += l.weight;
+    if (l.weight > best) { best = l.weight; bestKey = key; }
+  }
+  const lead = bestKey ? tree.labels[bestKey] : null;
+  return { key: bestKey, display: lead ? lead.display : '???', weight: best, total, share: total ? best / total : 0 };
+}
+function isResolved(tree) {
+  const c = consensus(tree);
+  return c.total >= RESOLVE_MIN_WEIGHT && c.share >= RESOLVE_SHARE;
+}
+// pay out pending guesses once a tree's consensus locks in
+function settleTree(tree) {
+  if (!isResolved(tree)) return;
+  const winKey = consensus(tree).key;
+  const winSp = spForLabel(winKey);
+  const mine = state.pending.filter(p => p.treeId === tree.id);
+  if (!mine.length) return;
+  state.pending = state.pending.filter(p => p.treeId !== tree.id);
+  mine.forEach(p => {
+    if (winSp) state.attempts[winSp.id] = (state.attempts[winSp.id] || 0) + 1;
+    if (p.key === winKey) {
+      state.score += 75;
+      addRep(8, 'YOU CALLED ' + prettyLabel(winKey).toUpperCase() + ' EARLY');
+      if (winSp) state.dex[winSp.id] = (state.dex[winSp.id] || 0) + 1;
+      sfx.correct();
+    } else {
+      state.score = Math.max(0, state.score - 10);
+      addRep(-2, 'CROWD SETTLED ON ' + prettyLabel(winKey).toUpperCase());
+    }
+  });
+  saveState(); updateHud(); refreshMarker(tree);
+}
+// stand-in for other players. Each simulated voter has their OWN weight:
+// low-rep jokers (weight 1) sometimes vote junk; high-rep experts (weight 2-5) vote the true species.
+// Convergence to truth comes from accurate weight accumulating, not from any single oracle.
+function simulateVoter() {
+  const expert = Math.random() < 0.45;
+  const weight = expert ? 2 + Math.floor(Math.random() * 4) : 1;
+  const accurate = expert ? Math.random() < 0.9 : Math.random() < 0.55;
+  return { weight, accurate };
+}
+function simulateCrowd() {
+  if (!map) return;
+  let changed = false;
+  state.trees.forEach(tree => {
+    if (isResolved(tree) || Math.random() > 0.5) return;
+    const before = consensus(tree).key;
+    const v = simulateVoter();
+    let name;
+    if (v.accurate) name = tree.truth || consensus(tree).display;
+    else name = Math.random() < 0.5 ? JUNK_NAMES[Math.floor(Math.random() * JUNK_NAMES.length)]
+                                    : SPECIES[Math.floor(Math.random() * SPECIES.length)].name;
+    castVote(tree, name, v.weight);
+    changed = true;
+    handleRename(tree, before);
+    if (isResolved(tree)) settleTree(tree);
+    refreshMarker(tree);
+  });
+  if (changed) { saveState(); updateHud(); }
+}
+// when the leading label flips, announce it (Wikipedia-style correction) and penalise a bad planter
+function handleRename(tree, beforeKey) {
+  const afterKey = consensus(tree).key;
+  if (!beforeKey || beforeKey === afterKey) return;
+  tree.renamedFrom = tree.labels[beforeKey] ? tree.labels[beforeKey].display : beforeKey;
+  const from = tree.renamedFrom, to = consensus(tree).display;
+  if (isResolved(tree)) toast('THE CROWD WISES UP: ' + from.toUpperCase() + ' → ' + to.toUpperCase());
+  // if this is YOUR tree and the crowd overturned the name you planted it under, trust takes a hit
+  if (tree.mine && tree.myLabel && tree.myLabel === beforeKey && afterKey !== tree.myLabel) {
+    tree.myLabel = null;
+    addRep(-5, 'YOUR TREE "' + from.toUpperCase() + '" WAS RE-NAMED');
+  }
+}
+
+/* ---------------- screens / nav ---------------- */
+function show(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('screen-' + id).classList.add('active');
+  document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.nav === id));
+  if (id === 'map' && map) setTimeout(() => map.invalidateSize(), 60);
+  if (id === 'dex') renderDex();
+}
+document.querySelectorAll('[data-nav]').forEach(b => b.addEventListener('click', () => { sfx.tap(); show(b.dataset.nav); }));
+
+function toast(msg, ms=2200) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.style.display = 'block';
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', ms);
+}
+function updateHud() {
+  document.getElementById('hud-score').textContent = state.score;
+  document.getElementById('hud-rep').textContent = state.rep;
+  document.getElementById('hud-rank').textContent = myLevel().name + ' ×' + myWeight();
+  document.getElementById('sound-toggle').textContent = state.sound ? '♫' : '♪̸';
+  document.getElementById('sound-toggle').style.opacity = state.sound ? 1 : 0.4;
+}
+document.getElementById('sound-toggle').addEventListener('click', () => {
+  state.sound = !state.sound; saveState(); updateHud();
+  if (state.sound) { music.start(); sfx.tap(); } else { music.stop(); }
+});
+
+/* ---------------- map ---------------- */
+let map = null, meMarker = null, myPos = null;
+const markers = {};
+
+function initMap(lat, lng) {
+  map = L.map('map', { zoomControl: false, attributionControl: false }).setView([lat, lng], 15);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+  L.control.attribution({ prefix: false }).addAttribution('&copy; OpenStreetMap').addTo(map);
+  meMarker = L.marker([lat, lng], { icon: L.divIcon({ className: 'me-marker', html: '&#129485;', iconSize: [24, 24] }) }).addTo(map);
+  state.trees.forEach(addMarker);
+}
+function addMarker(tree) {
+  const c = consensus(tree);
+  const img = tree.photo || spriteForLabel(c.key, tree.seed || 1);
+  const resolved = isResolved(tree);
+  let badge = '';
+  if (tree.mine) badge = '<span class="badge">&#11088;</span>';
+  else if (!resolved) badge = '<span class="badge q">?</span>';
+  // show the CURRENT leading name under confirmed trees — even if it's "Steve"
+  const label = resolved ? `<span class="mlabel">${c.display}</span>` : '';
+  const icon = L.divIcon({
+    className: 'tree-marker' + (tree.done ? ' done' : ''),
+    html: `<img src="${img}">` + badge + label,
+    iconSize: [44, 44], iconAnchor: [22, 40],
+  });
+  const m = L.marker([tree.lat, tree.lng], { icon }).addTo(map);
+  m.on('click', () => onTreeTap(tree));
+  markers[tree.id] = m;
+}
+function refreshMarker(tree) { if (markers[tree.id]) { map.removeLayer(markers[tree.id]); addMarker(tree); } }
+
+function onTreeTap(tree) {
+  sfx.tap();
+  if (tree.mine) { toast('YOUR TREE — CURRENTLY KNOWN AS "' + consensus(tree).display.toUpperCase() + '"'); return; }
+  if (tree.done) {
+    // you can always weigh in again — that's how a wrong crowd gets corrected
+    toast(isResolved(tree)
+      ? 'CONFIRMED: ' + consensus(tree).display.toUpperCase() + ' — TAP AGAIN TO CONTEST'
+      : 'CROWD STILL DECIDING (' + Math.round(consensus(tree).total) + '/' + RESOLVE_MIN_WEIGHT + ' WEIGHT)');
+  }
+  startGuess(tree);
+}
+
+function distanceM(a, b) {
+  const R = 6371000, dLat = (b.lat - a.lat) * Math.PI/180, dLng = (b.lng - a.lng) * Math.PI/180;
+  const h = Math.sin(dLat/2)**2 + Math.cos(a.lat*Math.PI/180) * Math.cos(b.lat*Math.PI/180) * Math.sin(dLng/2)**2;
+  return Math.round(2 * R * Math.asin(Math.sqrt(h)));
+}
+
+/* ---------------- guess flow ---------------- */
+const GUESS_SECONDS = 60;
+let guess = null; // {tree, t0, timerH, answered}
+
+function startGuess(tree) {
+  guess = { tree, t0: null, timerH: null, answered: false };
+  const photoEl = document.getElementById('guess-photo');
+  const loadingEl = document.getElementById('guess-loading');
+  document.getElementById('guess-dist').textContent = myPos ? distanceM(myPos, tree) + 'm AWAY' : '';
+  document.getElementById('guess-secs').textContent = GUESS_SECONDS;
+  document.getElementById('guess-timer-bar').style.width = '100%';
+  const input = document.getElementById('guess-input');
+  input.value = '';
+  document.getElementById('guess-q').textContent = tree.done ? 'DISAGREE? RE-NAME IT!' : 'NAME THAT TREE!';
+  // quick-pick chips are common suggestions only — the real answer space is the text box
+  speciesGridInto(document.getElementById('guess-options'), sp => answer(sp.name));
+  show('guess');
+
+  // the clock starts only once the player can actually SEE the tree
+  const begin = () => { if (guess && guess.tree === tree && !guess.t0) { guess.t0 = performance.now(); runTimer(); } };
+  const spKey = tree.truth ? labelKey(tree.truth) : consensus(tree).key;
+  const spId = (spForLabel(spKey) || {}).id || '__unknown__';
+  if (tree.photo) {
+    photoEl.src = tree.photo;
+    loadingEl.style.display = 'none';
+    begin();
+  } else {
+    photoEl.src = '';
+    loadingEl.style.display = 'flex';
+    const reveal = url => {
+      if (!guess || guess.tree !== tree || guess.t0) return;
+      photoEl.src = url;
+      loadingEl.style.display = 'none';
+      begin();
+    };
+    // real photo of what this tree actually is; sprite fallback if fetch or load fails
+    const fallback = () => reveal(treeSprite(spId, tree.seed || 1, 256));
+    speciesPhoto(spId).then(u => {
+      if (!u) return fallback();
+      const im = new Image();
+      im.onload = () => reveal(u);
+      im.onerror = fallback;
+      im.src = u;
+    });
+    setTimeout(fallback, 8000);
+  }
+}
+document.getElementById('btn-guess-go').addEventListener('click', () => {
+  const v = document.getElementById('guess-input').value;
+  if (v.trim()) answer(v);
+});
+document.getElementById('guess-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.value.trim()) answer(e.target.value);
+});
+
+function runTimer() {
+  const bar = document.getElementById('guess-timer-bar');
+  bar.classList.remove('hurry');
+  let lastTickSec = GUESS_SECONDS;
+  guess.timerH = setInterval(() => {
+    const elapsed = (performance.now() - guess.t0) / 1000;
+    const left = Math.max(0, GUESS_SECONDS - elapsed);
+    bar.style.width = (left / GUESS_SECONDS * 100) + '%';
+    document.getElementById('guess-secs').textContent = Math.ceil(left);
+    if (left <= 10) bar.classList.add('hurry');
+    if (left <= 5 && Math.ceil(left) !== lastTickSec) { sfx.tick(); lastTickSec = Math.ceil(left); }
+    if (left <= 0) answer(null);
+  }, 100);
+}
+
+function answer(text) {
+  if (!guess || guess.answered || (!guess.t0 && text)) return;
+  guess.answered = true;
+  clearInterval(guess.timerH);
+  const { tree } = guess;
+  const left = guess.t0 ? Math.max(0, GUESS_SECONDS - (performance.now() - guess.t0) / 1000) : 0;
+  const wasResolved = isResolved(tree);
+  const beforeKey = consensus(tree).key;
+
+  // your vote carries YOUR trust weight — a TREE ELDER moves consensus 5× harder than a SPROUT
+  const myKey = text ? castVote(tree, text, myWeight()) : null;
+  guess.myKey = myKey;
+  tree.done = true;
+  if (myKey) handleRename(tree, beforeKey);
+
+  let pts = 0, verdict, repDelta = 0;
+  if (!myKey) {
+    pts = -10; state.streak = 0; verdict = 'timeout'; sfx.wrong();
+    state.score = Math.max(0, state.score + pts);
+  } else if (wasResolved) {
+    // tree was already CONFIRMED — we're confident, so score + trust resolve immediately
+    const winKey = consensus(tree).key, winSp = spForLabel(winKey);
+    if (winSp) state.attempts[winSp.id] = (state.attempts[winSp.id] || 0) + 1;
+    if (myKey === winKey) {
+      pts = 50 + Math.ceil(left) * 3;
+      state.streak += 1;
+      if (state.streak >= 3) pts += state.streak * 10;
+      verdict = 'good'; repDelta = 3;
+      if (winSp) state.dex[winSp.id] = (state.dex[winSp.id] || 0) + 1;
+      sfx.correct();
+    } else {
+      pts = -25; state.streak = 0; verdict = 'bad'; repDelta = -3; sfx.wrong();
+    }
+    state.score = Math.max(0, state.score + pts);
+    if (repDelta) addRep(repDelta);
+  } else {
+    // jury's still out: NOTHING is credited yet — trust is earned only when time proves you right
+    state.pending = state.pending.filter(p => p.treeId !== tree.id);
+    state.pending.push({ treeId: tree.id, key: myKey });
+    verdict = 'pending';
+    sfx.plant();
+  }
+  saveState();
+  updateHud();
+  refreshMarker(tree);
+  showResult(verdict, pts, tree, myKey);
+}
+
+function showResult(verdict, pts, tree, myKey) {
+  const v = document.getElementById('result-verdict');
+  const p = document.getElementById('result-points');
+  const resolved = isResolved(tree);
+  const c = consensus(tree);
+  const winSp = spForLabel(c.key);
+
+  if (verdict === 'pending') {
+    v.className = 'pend';
+    v.textContent = '🗳 VOTE CAST!';
+    p.textContent = c.total < RESOLVE_MIN_WEIGHT
+      ? 'PENDING — CROWD WEIGHT ' + Math.round(c.total) + '/' + RESOLVE_MIN_WEIGHT
+      : 'PENDING — NO CLEAR WINNER YET';
+  } else {
+    v.className = verdict === 'good' ? 'good' : 'bad';
+    v.textContent = verdict === 'good' ? '★ CORRECT! ★' : (verdict === 'timeout' ? 'TIME\'S UP!' : 'OUTVOTED!');
+    p.textContent = (pts >= 0 ? '+' : '') + pts + ' PTS' + (state.streak >= 3 ? '  × STREAK ' + state.streak + '!' : '');
+  }
+
+  // tally is only revealed AFTER you vote — no herding. Bars are weighted, not raw counts.
+  const rows = Object.entries(tree.labels).sort((a, b) => b[1].weight - a[1].weight).slice(0, 5);
+  document.getElementById('result-votes').innerHTML = rows.map(([key, l], i) => {
+    const pct = Math.round(l.weight / c.total * 100);
+    const youMark = key === myKey ? ' <span class="you">◀YOU</span>' : '';
+    return `<div class="vote-row ${i === 0 ? 'winner' : ''}">
+      <div class="vname">${l.display}${youMark}</div>
+      <div class="vbar-wrap"><div class="vbar" style="width:${pct}%"></div></div>
+      <div class="vpct">${pct}%</div>
+    </div>`;
+  }).join('');
+
+  let fact;
+  if (!resolved) {
+    fact = 'CONSENSUS NOT REACHED — TRUST IS PENDING. IF THE CROWD LANDS ON YOUR CALL: <b style="color:var(--yellow)">+75 PTS & +8 REP</b>. NAMES CAN STILL CHANGE.';
+  } else if (winSp) {
+    fact = `CONFIRMED: <b style="color:var(--green2)">${winSp.name}</b> <i style="color:var(--blue)">(${winSp.latin})</i><br>${winSp.fact}`;
+  } else {
+    // a crowd-coined name that isn't a known species — the "Steve" / discovery case
+    fact = `THE CROWD CALLS THIS <b style="color:var(--yellow)">"${c.display}"</b> — NOT A CATALOGUED SPECIES.<br>IT HOLDS UNTIL BETTER-TRUSTED NAMERS OVERTURN IT.`;
+  }
+  document.getElementById('result-fact').innerHTML = fact;
+  show('result');
+}
+document.getElementById('btn-result-done').addEventListener('click', () => { sfx.tap(); show('map'); });
+
+/* ---------------- capture flow ---------------- */
+let capPhoto = null, capCoords = null, capName = null;
+
+document.getElementById('cap-custom-input').addEventListener('input', e => {
+  capName = e.target.value.trim() || null;
+  document.getElementById('btn-cap-plant').disabled = !capName;
+  if (capName) document.querySelectorAll('#species-grid .sp').forEach(el => el.classList.remove('sel'));
+});
+
+document.getElementById('btn-cap-photo').addEventListener('click', () => { sfx.tap(); document.getElementById('cap-input').click(); });
+document.getElementById('cap-input').addEventListener('change', e => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const img = new Image();
+  img.onload = () => {
+    // crop square + downscale: 160px keeps the species identifiable but still chunky-retro
+    const side = Math.min(img.width, img.height);
+    const small = document.createElement('canvas');
+    small.width = small.height = 160;
+    const sx = small.getContext('2d');
+    sx.drawImage(img, (img.width - side)/2, (img.height - side)/2, side, side, 0, 0, 160, 160);
+    capPhoto = small.toDataURL('image/jpeg', 0.7);
+    const prev = document.getElementById('cap-preview');
+    prev.src = capPhoto; prev.style.display = 'block';
+    document.getElementById('cap-placeholder').style.display = 'none';
+    document.getElementById('cap-name-step').style.display = 'block';
+    URL.revokeObjectURL(img.src);
+    // grab location at capture time
+    document.getElementById('cap-geo').textContent = '\u{1F4CD} locating...';
+    navigator.geolocation.getCurrentPosition(
+      p => { capCoords = { lat: p.coords.latitude, lng: p.coords.longitude }; document.getElementById('cap-geo').textContent = '\u{1F4CD} ' + capCoords.lat.toFixed(4) + ', ' + capCoords.lng.toFixed(4); },
+      () => { capCoords = null; document.getElementById('cap-geo').textContent = '\u{1F4CD} no GPS — will plant near map centre'; },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  };
+  img.src = URL.createObjectURL(f);
+  e.target.value = '';
+});
+
+function speciesGridInto(container, onPick, selectable=false) {
+  container.innerHTML = '';
+  SPECIES.forEach(sp => {
+    const b = document.createElement('button');
+    b.className = 'sp';
+    b.innerHTML = `<img src="${treeSprite(sp.id, 3, 40)}"><br>${sp.name}`;
+    b.addEventListener('click', () => {
+      sfx.tap();
+      if (selectable) {
+        container.querySelectorAll('.sp').forEach(el => el.classList.remove('sel'));
+        b.classList.add('sel');
+      }
+      onPick(sp);
+    });
+    container.appendChild(b);
+  });
+}
+function renderSpeciesGrid() {
+  speciesGridInto(document.getElementById('species-grid'), sp => {
+    capName = sp.name;
+    document.getElementById('cap-custom-input').value = sp.name;
+    document.getElementById('btn-cap-plant').disabled = false;
+  }, true);
+}
+
+document.getElementById('btn-cap-plant').addEventListener('click', () => {
+  if (!capPhoto || !capName) return;
+  const c = map.getCenter();
+  const pos = capCoords || { lat: c.lat + (Math.random()-0.5)*0.002, lng: c.lng + (Math.random()-0.5)*0.002 };
+  const myKey = labelKey(capName);
+  const tree = {
+    id: 'mine-' + Date.now(),
+    lat: pos.lat, lng: pos.lng,
+    labels: {},
+    truth: spForLabel(myKey) ? capName : null,  // if it's a real species the sim can back you up; otherwise you're on your own
+    myLabel: myKey,       // remember what YOU named it — you lose rep if the crowd overturns it
+    renamedFrom: null,
+    photo: capPhoto,
+    seed: 1, mine: true, done: false,
+  };
+  // planter's founding vote carries their trust weight
+  castVote(tree, capName, myWeight());
+  state.trees.push(tree);
+  state.score += 20;
+  saveState(); updateHud();
+  addMarker(tree);
+  sfx.plant();
+  toast('TREE PLANTED AS "' + capName.toUpperCase() + '"! +20 — NOW THE CROWD DECIDES');
+  // reset capture UI
+  capPhoto = null; capName = null; capCoords = null;
+  document.getElementById('cap-preview').style.display = 'none';
+  document.getElementById('cap-placeholder').style.display = 'block';
+  document.getElementById('cap-name-step').style.display = 'none';
+  document.getElementById('cap-custom-input').value = '';
+  document.getElementById('btn-cap-plant').disabled = true;
+  document.getElementById('cap-geo').textContent = '\u{1F4CD} waiting for photo...';
+  show('map');
+  map.setView([pos.lat, pos.lng], 16);
+});
+
+/* ---------------- dex (open, growing registry) ---------------- */
+// crowd-confirmed labels that AREN'T in our seed field-guide — new candidate "species" the game surfaced
+function discoveredLabels() {
+  const out = {};
+  state.trees.forEach(t => {
+    if (!isResolved(t)) return;
+    const c = consensus(t);
+    if (spForLabel(c.key)) return;             // known species already have a card
+    (out[c.key] = out[c.key] || { display: c.display, seed: t.seed, count: 0 }).count++;
+  });
+  return out;
+}
+function renderDex() {
+  const found = Object.keys(state.dex).length;
+  const disc = discoveredLabels();
+  const discCount = Object.keys(disc).length;
+  document.getElementById('dex-sub').innerHTML =
+    `${found} NAMED &middot; ${discCount} NEW CANDIDATE${discCount === 1 ? '' : 'S'} FOUND<br>` +
+    `<span style="color:#6a7b9b">OF 60,000+ TREE SPECIES KNOWN TO SCIENCE — ~9,000 STILL UNDISCOVERED</span>`;
+
+  let html = '<div class="dex-section">FIELD GUIDE</div>';
+  html += '<div class="dex-grid-inner">' + SPECIES.map((sp, i) => {
+    const n = state.dex[sp.id] || 0;
+    return `<div class="dex-card ${n ? '' : 'locked'}" data-sp="${sp.id}">
+      <div class="dno">#${String(i + 1).padStart(3, '0')}</div>
+      <img src="${treeSprite(sp.id, 3, 52)}">
+      <div class="dname">${n ? sp.name : '???'}</div>
+      <div class="dlatin">${n ? sp.latin : ''}</div>
+      <div class="dcount">${n ? '×' + n : ''}</div>
+    </div>`;
+  }).join('') + '</div>';
+
+  if (discCount) {
+    html += '<div class="dex-section">DISCOVERED BY THE CROWD</div>';
+    html += '<div class="dex-grid-inner">' + Object.entries(disc).map(([key, d]) =>
+      `<div class="dex-card discovered" data-label="${key}">
+        <div class="dno">NEW</div>
+        <img src="${treeSprite('__unknown__', d.seed || 1, 52)}">
+        <div class="dname">${d.display}</div>
+        <div class="dlatin">candidate</div>
+        <div class="dcount">×${d.count}</div>
+      </div>`).join('') + '</div>';
+  }
+  document.getElementById('dex-grid').innerHTML = html;
+  document.querySelectorAll('.dex-card[data-sp]').forEach(card =>
+    card.addEventListener('click', () => { sfx.tap(); renderDexInfo(card.dataset.sp); }));
+  document.querySelectorAll('.dex-card[data-label]').forEach(card =>
+    card.addEventListener('click', () => { sfx.tap(); toast('CANDIDATE "' + card.querySelector('.dname').textContent.toUpperCase() + '" — CONFIRMED BY CROWD, AWAITING SCIENCE'); }));
+}
+
+function renderDexInfo(spId) {
+  const sp = SP[spId];
+  const idx = SPECIES.indexOf(sp);
+  const named = state.dex[spId] || 0;
+  const attempts = state.attempts[spId] || 0;
+  const unlocked = named > 0;
+
+  document.getElementById('dexinfo-no').textContent = '#' + String(idx + 1).padStart(3, '0');
+  document.getElementById('dexinfo-name').textContent = unlocked ? sp.name.toUpperCase() : '???';
+
+  const sprite = document.getElementById('dexinfo-sprite');
+  sprite.src = treeSprite(spId, 3, 128);
+  sprite.style.filter = unlocked ? '' : 'brightness(0)';
+
+  const photo = document.getElementById('dexinfo-photo');
+  const photoQ = document.getElementById('dexinfo-photo-q');
+  photo.style.display = 'none';
+  photoQ.style.display = 'block';
+  if (unlocked) {
+    speciesPhoto(spId).then(u => {
+      if (u && document.getElementById('dexinfo-no').textContent === '#' + String(idx + 1).padStart(3, '0')) {
+        photo.src = u; photo.style.display = 'block'; photoQ.style.display = 'none';
+      }
+    });
+  }
+
+  document.getElementById('dexinfo-latin').textContent = unlocked ? sp.latin : 'UNKNOWN SPECIES';
+  const row = (k, v) => `<div class="stat-row"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  document.getElementById('dexinfo-stats').innerHTML = unlocked
+    ? row('FAMILY', sp.family) + row('TYPE', sp.kind) + row('HEIGHT', sp.height)
+    : row('FAMILY', '???') + row('TYPE', '???') + row('HEIGHT', '???');
+  document.getElementById('dexinfo-tips').innerHTML = unlocked
+    ? row('LEAF', sp.leaf) + row('BARK', sp.bark) + row('FRUIT', sp.fruit)
+    : '<div class="stat-row"><span class="k">NAME ONE IN THE WILD TO UNLOCK ID TIPS</span></div>';
+  const acc = attempts ? Math.round(named / attempts * 100) + '%' : '—';
+  document.getElementById('dexinfo-record').innerHTML =
+    row('NAMED', '×' + named) + row('ENCOUNTERS', '×' + attempts) + row('ACCURACY', acc);
+  document.getElementById('dexinfo-fact').innerHTML = unlocked ? sp.fact : '';
+  show('dexinfo');
+}
+
+/* ---------------- boot sequence ---------------- */
+function bootTitleTrees() {
+  const wrap = document.getElementById('title-trees');
+  ['oak', 'pine', 'cherry', 'willow'].forEach(id => {
+    const img = document.createElement('img');
+    img.src = treeSprite(id, 2, 52);
+    img.className = 'px';
+    wrap.appendChild(img);
+  });
+}
+
+const BOOT_LINES = [
+  'TREEDEX OS v0.2', 'LOADING FLORA DATABASE...', '> 60,000+ SPECIES INDEXED',
+  '> ~9,000 AWAITING DISCOVERY', 'CALIBRATING CROWD CONSENSUS...', 'GPS LINK ....... OK',
+  'TRUST ENGINE ... OK', 'READY.',
+];
+let booted = false;
+function runBoot() {
+  if (booted) return; booted = true;
+  const hint = document.getElementById('boot-hint');
+  const out = document.getElementById('boot-text');
+  hint.style.display = 'none';
+  out.style.display = 'block';
+  out.innerHTML = '';
+  music.start();
+  let i = 0;
+  (function line() {
+    if (i >= BOOT_LINES.length) {
+      setTimeout(() => {
+        out.style.display = 'none';
+        document.getElementById('title-main').style.display = 'flex';
+      }, 350);
+      return;
+    }
+    out.innerHTML += BOOT_LINES[i] + '<br>';
+    sfx.boot();
+    i++;
+    setTimeout(line, 260);
+  })();
+}
+document.getElementById('dex-screen').addEventListener('click', runBoot);
+
+document.getElementById('btn-start').addEventListener('click', () => {
+  runBoot();
+  sfx.start();
+  show('map');
+  document.getElementById('map-banner').style.display = 'block';
+  setTimeout(() => document.getElementById('map-banner').style.display = 'none', 4000);
+
+  const fallback = { lat: 51.5073, lng: -0.1657 }; // Hyde Park, London
+  const begin = (lat, lng) => {
+    myPos = { lat, lng };
+    if (!state.seededAt) seedTrees(lat, lng);
+    if (!map) initMap(lat, lng);
+    else { map.setView([lat, lng], 15); meMarker.setLatLng([lat, lng]); }
+  };
+  if (!navigator.geolocation) { begin(fallback.lat, fallback.lng); return; }
+  // start with last seeded location (or fallback) immediately, refine when GPS lands
+  const start = state.seededAt || fallback;
+  begin(start.lat, start.lng);
+  navigator.geolocation.getCurrentPosition(
+    p => {
+      myPos = { lat: p.coords.latitude, lng: p.coords.longitude };
+      if (!state.seededAt) { seedTrees(myPos.lat, myPos.lng); state.trees.forEach(addMarker); }
+      meMarker.setLatLng([myPos.lat, myPos.lng]);
+      map.setView([myPos.lat, myPos.lng], 15);
+    },
+    () => toast('NO GPS — PLAYING IN HYDE PARK MODE'),
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+});
+
+bootTitleTrees();
+renderSpeciesGrid();
+updateHud();
+// the "other players": every 12s some of them vote on unresolved trees
+setInterval(simulateCrowd, 12000);
+</script>
+</body>
+</html>
