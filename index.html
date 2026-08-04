@@ -856,6 +856,7 @@ function consensus(tree) {
   return { key: bestKey, display: lead ? lead.display : '???', weight: best, total, share: total ? best / total : 0 };
 }
 function isResolved(tree) {
+  if (tree.resolvedAt) return true; // server has permanently locked this tree
   const c = consensus(tree);
   return c.total >= RESOLVE_MIN_WEIGHT && c.share >= RESOLVE_SHARE;
 }
@@ -881,6 +882,30 @@ function settleTree(tree) {
   });
   saveState(); updateHud(); refreshMarker(tree);
 }
+// local verdict helper: used in local mode and as backend fallback
+function _localVerdict(wasResolved, tree, myKey, left) {
+  let pts = 0, verdict, repDelta = 0;
+  if (wasResolved) {
+    const winKey = consensus(tree).key, winSp = spForLabel(winKey);
+    if (winSp) state.attempts[winSp.id] = (state.attempts[winSp.id] || 0) + 1;
+    if (myKey === winKey) {
+      pts = 50 + Math.ceil(left) * 3; state.streak += 1;
+      if (state.streak >= 3) pts += state.streak * 10;
+      verdict = 'good'; repDelta = 3;
+      if (winSp) state.dex[winSp.id] = (state.dex[winSp.id] || 0) + 1;
+      sfx.correct();
+    } else {
+      pts = -25; state.streak = 0; verdict = 'bad'; repDelta = -3; sfx.wrong();
+    }
+    addRep(repDelta);
+  } else {
+    state.pending = state.pending.filter(p => p.treeId !== tree.id);
+    state.pending.push({ treeId: tree.id, key: myKey });
+    verdict = 'pending'; sfx.plant();
+  }
+  return { pts, verdict, repDelta };
+}
+
 // stand-in for other players. Each simulated voter has their OWN weight:
 // low-rep jokers (weight 1) sometimes vote junk; high-rep experts (weight 2-5) vote the true species.
 // Convergence to truth comes from accurate weight accumulating, not from any single oracle.
@@ -1088,7 +1113,7 @@ function runTimer() {
   }, 100);
 }
 
-function answer(text) {
+async function answer(text) {
   if (!guess || guess.answered || (!guess.t0 && text)) return;
   guess.answered = true;
   clearInterval(guess.timerH);
@@ -1099,41 +1124,66 @@ function answer(text) {
 
   // your vote carries YOUR trust weight — a TREE ELDER moves consensus 5× harder than a SPROUT
   const myKey = text ? castVote(tree, text, myWeight()) : null;
-  // in backend mode, also persist the vote server-side (weight recomputed from rep there)
-  if (BACKEND.on && text && myKey) {
-    NTT_NET.castVote(tree.id, text).catch(e => { console.warn('vote sync failed:', e); toast('VOTE SAVED LOCALLY — SYNC FAILED'); });
-  }
   guess.myKey = myKey;
   tree.done = true;
   if (myKey) handleRename(tree, beforeKey);
 
   let pts = 0, verdict, repDelta = 0;
+
   if (!myKey) {
+    // timeout — same in both modes
     pts = -10; state.streak = 0; verdict = 'timeout'; sfx.wrong();
-    state.score = Math.max(0, state.score + pts);
-  } else if (wasResolved) {
-    // tree was already CONFIRMED — we're confident, so score + trust resolve immediately
-    const winKey = consensus(tree).key, winSp = spForLabel(winKey);
-    if (winSp) state.attempts[winSp.id] = (state.attempts[winSp.id] || 0) + 1;
-    if (myKey === winKey) {
-      pts = 50 + Math.ceil(left) * 3;
-      state.streak += 1;
-      if (state.streak >= 3) pts += state.streak * 10;
-      verdict = 'good'; repDelta = 3;
-      if (winSp) state.dex[winSp.id] = (state.dex[winSp.id] || 0) + 1;
-      sfx.correct();
-    } else {
-      pts = -25; state.streak = 0; verdict = 'bad'; repDelta = -3; sfx.wrong();
+  } else if (BACKEND.on) {
+    // SERVER-AUTHORITATIVE: cast vote and trust server for rep
+    let sv = null;
+    try { sv = await NTT_NET.castVote(tree.id, text); } catch (e) {
+      console.warn('vote sync failed:', e); toast('VOTE SAVED LOCALLY \u2014 SYNC FAILED');
     }
-    state.score = Math.max(0, state.score + pts);
-    if (repDelta) addRep(repDelta);
+    if (sv && sv.verdict) {
+      verdict = sv.verdict; repDelta = sv.repDelta || 0;
+      state.rep = sv.rep; // server is the single source of truth for rep
+      if (verdict === 'good') {
+        const winSp = spForLabel(consensus(tree).key);
+        if (winSp) { state.attempts[winSp.id] = (state.attempts[winSp.id] || 0) + 1; state.dex[winSp.id] = (state.dex[winSp.id] || 0) + 1; }
+        pts = 50 + Math.ceil(left) * 3; state.streak += 1;
+        if (state.streak >= 3) pts += state.streak * 10;
+        sfx.correct();
+      } else if (verdict === 'bad') {
+        const winSp = spForLabel(consensus(tree).key);
+        if (winSp) state.attempts[winSp.id] = (state.attempts[winSp.id] || 0) + 1;
+        pts = -25; state.streak = 0; sfx.wrong();
+      } else if (verdict === 'resolved') {
+        // your vote just tipped the tree to consensus!
+        tree.resolvedAt = true;
+        tree.resolvedLabel = sv.resolvedLabel;
+        const winLabel = sv.resolvedLabel || consensus(tree).key;
+        const winSp = spForLabel(winLabel);
+        if (repDelta > 0) {
+          if (winSp) { state.attempts[winSp.id] = (state.attempts[winSp.id] || 0) + 1; state.dex[winSp.id] = (state.dex[winSp.id] || 0) + 1; }
+          pts = 75; state.streak += 1; sfx.correct();
+          verdict = 'good'; // display as correct in showResult
+        } else {
+          if (winSp) state.attempts[winSp.id] = (state.attempts[winSp.id] || 0) + 1;
+          pts = -10; state.streak = 0; sfx.wrong();
+          verdict = 'bad';
+        }
+      } else { // pending or changed
+        if (verdict === 'pending') {
+          state.pending = state.pending.filter(p => p.treeId !== tree.id);
+          state.pending.push({ treeId: tree.id, key: myKey });
+        }
+        sfx.plant();
+      }
+    } else {
+      // server unreachable or no verdict: fall back to local logic
+      ({ pts, verdict, repDelta } = _localVerdict(wasResolved, tree, myKey, left));
+    }
   } else {
-    // jury's still out: NOTHING is credited yet — trust is earned only when time proves you right
-    state.pending = state.pending.filter(p => p.treeId !== tree.id);
-    state.pending.push({ treeId: tree.id, key: myKey });
-    verdict = 'pending';
-    sfx.plant();
+    // LOCAL MODE: original client-side logic
+    ({ pts, verdict, repDelta } = _localVerdict(wasResolved, tree, myKey, left));
   }
+
+  state.score = Math.max(0, state.score + pts);
   saveState();
   updateHud();
   refreshMarker(tree);
@@ -1559,6 +1609,11 @@ async function bootBackend() {
 // pull shared trees + votes and fold them into the local tree shape the UI already renders
 async function syncFromBackend() {
   const [trees, votesAll] = await Promise.all([NTT_NET.fetchTrees(), NTT_NET.fetchVotes()]);
+  // sync rep from server (source of truth)
+  try {
+    const serverRep = await NTT_NET.fetchMyRep();
+    if (typeof serverRep === 'number') { state.rep = serverRep; }
+  } catch (e) { /* non-fatal: keep local rep */ }
   const byTree = {};
   votesAll.forEach(v => { (byTree[v.tree_id] = byTree[v.tree_id] || []).push(v); });
   // rebuild state.trees from the server (server is source of truth in backend mode)
@@ -1568,9 +1623,33 @@ async function syncFromBackend() {
       truth: null, renamedFrom: null, photo: t.photo_url || null,
       seed: parseInt(String(t.id).replace(/\D/g,'').slice(0,5) || '1', 10) || 1,
       mine: t.created_by === NTT_NET._userId, done: false,
+      resolvedAt: t.resolved_at || null,
+      resolvedLabel: t.resolved_label || null,
     };
     (byTree[t.id] || []).forEach(v => castVote(tr, v.label, Number(v.weight) || 1));
     return tr;
+  });
+  // settle pending votes for trees that just resolved (e.g. from another player's vote)
+  const oldPending = state.pending.slice();
+  state.pending = [];
+  oldPending.forEach(p => {
+    const tree = rebuilt.find(t => t.id === p.treeId);
+    if (tree && tree.resolvedAt) {
+      // this tree was resolved since you voted — server already adjusted your rep
+      const correct = p.key === tree.resolvedLabel;
+      if (correct) {
+        state.score += 75;
+        const winSp = spForLabel(tree.resolvedLabel);
+        if (winSp) state.dex[winSp.id] = (state.dex[winSp.id] || 0) + 1;
+        sfx.correct();
+        toast('+75 PTS \u2014 YOU CALLED ' + prettyLabel(tree.resolvedLabel).toUpperCase() + ' EARLY!');
+      } else {
+        state.score = Math.max(0, state.score - 10); sfx.wrong();
+        toast('CROWD SETTLED ON ' + prettyLabel(tree.resolvedLabel).toUpperCase());
+      }
+    } else {
+      state.pending.push(p); // still unresolved, keep waiting
+    }
   });
   state.trees = rebuilt;
   state.seededAt = state.seededAt || (myPos ? { lat: myPos.lat, lng: myPos.lng } : null);
@@ -1581,6 +1660,7 @@ async function syncFromBackend() {
     state.trees.forEach(addMarker);
   }
   saveState();
+  updateHud();
 }
 bootBackend();
 

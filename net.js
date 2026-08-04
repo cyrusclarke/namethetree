@@ -99,8 +99,19 @@
   };
 
   net.castVote = async function (treeId, label) {
-    const { error } = await net._sb.rpc('cast_vote', { p_tree: treeId, p_label: label });
+    const { data, error } = await net._sb.rpc('cast_vote', { p_tree: treeId, p_label: label });
     if (error) throw error;
+    // server returns { verdict, repDelta, rep, resolved, resolvedLabel }
+    return data || null;
+  };
+
+  // fetch the caller's current rep from profiles (server is source of truth)
+  net.fetchMyRep = async function () {
+    if (!net._userId) return null;
+    const { data, error } = await net._sb.from('profiles')
+      .select('rep').eq('id', net._userId).single();
+    if (error) throw error;
+    return (data && typeof data.rep === 'number') ? data.rep : 0;
   };
 
   net.onChange = function (cb) {

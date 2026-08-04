@@ -23,9 +23,21 @@ Outstanding: real-iPhone spot-check by Cyrus (Add to Home Screen + outdoor play)
 - [x] `net.js` data layer: anon auth, fetch trees/votes/consensus, plant, castVote, realtime onChange
 - [x] Wired into index.html behind `BACKEND.on` flag — opt-in via `window.NTT_CONFIG`, local mode unchanged
 - [x] Vote + plant write-through to server in backend mode; simulateCrowd disabled when live
-- [ ] **Needs Cyrus:** create Supabase project, run schema, enable anon auth, hand me URL + anon key
-- [ ] Photo storage (Supabase Storage) so planted trees show real user snaps
-- [ ] Server-side reputation payouts + resolution (edge function / RPC)
+- [x] Supabase project live, schema applied, anon auth enabled
+- [x] Config wired (`config.js` → `window.NTT_CONFIG`), pushed to GitHub Pages
+- [x] Photo storage (Supabase Storage bucket `tree-photos`): upload + public read verified
+- [x] **Server-side reputation payouts + resolution** (`backend/002-resolution.sql`):
+  - `resolved_at` / `resolved_label` columns on trees (permanent lock)
+  - Enhanced `cast_vote` RPC detects resolution threshold, pays out all voters
+  - Winners +8 rep, losers -2 rep, planter rename penalty -5
+  - Race-safe: only one concurrent transaction triggers payouts (IF FOUND guard)
+  - Returns `{verdict, repDelta, rep, resolved, resolvedLabel}` — server is source of truth
+- [x] Client integration: `answer()` is async, uses server verdict + rep in backend mode
+  - `_localVerdict` helper for local/fallback mode (zero behaviour change in offline play)
+  - `isResolved()` respects `tree.resolvedAt` from server
+  - `syncFromBackend()` syncs rep from server, settles pending votes on resolution
+  - Realtime: other players' votes that resolve a tree trigger settlement + toast
+- [ ] **Needs Cyrus:** run `backend/002-resolution.sql` in Supabase SQL Editor
 - [ ] Vite refactor (ES modules) once backend is proven, keeping loop runnable
 
 ### Notes

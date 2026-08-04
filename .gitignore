@@ -2,3 +2,4 @@
 .claude/
 .ntt-token
 .env
+node_modules/
