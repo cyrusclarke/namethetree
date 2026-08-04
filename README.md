@@ -29,7 +29,25 @@ Then open `http://localhost:4173`.
 
 ## Status
 
-Local prototype (v0.2). State persists in `localStorage`; the "other players" are currently simulated. Natural next step is a real backend (players, shared trees, vote weighting by track record, and clustering candidate names against a taxonomic database).
+**Phase 2 live.** Installable PWA over HTTPS, real Supabase backend (shared trees, votes, consensus, realtime, photo storage), server-authoritative reputation with resolution payouts. Live at [cyrusclarke.github.io/namethetree](https://cyrusclarke.github.io/namethetree/).
+
+See `PROGRESS.md` for the running log, `DECISIONS.md` for architectural choices.
+
+## How work is tracked
+
+All open engineering work lives in [GitHub Issues on this repo](https://github.com/cyrusclarke/namethetree/issues). Labels used:
+
+- `hygiene`, `content`, `feature` — the kind of work
+- `backend`, `frontend` — where in the stack it lives
+- `needs-decision`, `blocked` — waiting on something
+- `size:S` / `size:M` / `size:L` — rough effort
+
+### Change types
+
+- **Trivial** (typo, comment) → direct push to `main`, no issue
+- **Contained** (hygiene, small content) → issue for the record, commit with `closes #N` to `main`
+- **Behavioural** (game logic, schema, user-visible flows) → issue + branch + PR against `main` before merge
+- **Product decisions** → issue only; discussed in comments; implementation follows in a PR
 
 ## Tech
 
